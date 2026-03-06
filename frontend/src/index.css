@@ -1,68 +1,153 @@
+@import "tailwindcss";
+
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --background: oklch(0.13 0.03 252);
+  --foreground: oklch(0.95 0.02 243);
+  --card: oklch(0.2 0.03 251 / 70%);
+  --card-foreground: oklch(0.95 0.02 243);
+  --primary: oklch(0.62 0.14 243);
+  --primary-foreground: oklch(0.99 0.01 243);
+  --secondary: oklch(0.28 0.04 247);
+  --secondary-foreground: oklch(0.95 0.02 243);
+  --muted: oklch(0.25 0.03 247);
+  --muted-foreground: oklch(0.86 0.03 245);
+  --accent: oklch(0.3 0.05 240);
+  --accent-foreground: oklch(0.96 0.02 243);
+  --destructive: oklch(0.63 0.2 25);
+  --destructive-foreground: oklch(0.98 0.01 243);
+  --border: oklch(0.9 0.03 244 / 30%);
+  --input: oklch(0.9 0.03 244 / 35%);
+  --ring: oklch(0.72 0.11 238);
+  --radius: 0.75rem;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-  a:hover {
-    color: #747bff;
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    min-width: 320px;
+    margin: 0;
+    background: radial-gradient(circle at top, #1a2740 0%, #0c1426 52%, #070d18 100%);
+    font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
   }
-  button {
-    background-color: #f9f9f9;
+}
+
+.vapor-smoke-layer {
+  position: absolute;
+  inset: -24%;
+  pointer-events: none;
+  opacity: 0.9;
+  isolation: isolate;
+  mix-blend-mode: screen;
+  transform: translate3d(0, 0, 0);
+  filter: blur(22px);
+  background:
+    radial-gradient(40% 30% at 16% 76%, rgba(176, 198, 232, 0.3), transparent 72%),
+    radial-gradient(38% 28% at 84% 74%, rgba(170, 194, 231, 0.28), transparent 72%),
+    radial-gradient(30% 22% at 52% 44%, rgba(143, 168, 207, 0.2), transparent 70%);
+  animation: vapor-smoke-drift 22s ease-in-out infinite alternate;
+}
+
+.vapor-smoke-layer::before,
+.vapor-smoke-layer::after {
+  content: '';
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+}
+
+.vapor-smoke-layer::before {
+  filter: blur(44px);
+  opacity: 0.28;
+  mix-blend-mode: screen;
+  background:
+    radial-gradient(30% 18% at 50% 96%, rgba(255, 160, 120, 0.46), transparent 70%),
+    radial-gradient(24% 14% at 42% 86%, rgba(255, 144, 108, 0.25), transparent 72%),
+    radial-gradient(24% 14% at 58% 84%, rgba(123, 162, 224, 0.16), transparent 70%);
+  animation: vapor-ember-burn 12s ease-in-out infinite;
+}
+
+.vapor-smoke-layer::after {
+  filter: blur(34px);
+  opacity: 0.46;
+  mix-blend-mode: screen;
+  background:
+    radial-gradient(24% 34% at 34% 58%, rgba(174, 198, 233, 0.28), transparent 74%),
+    radial-gradient(22% 32% at 66% 56%, rgba(170, 194, 230, 0.24), transparent 74%),
+    radial-gradient(18% 22% at 50% 32%, rgba(135, 162, 205, 0.2), transparent 72%);
+  animation: vapor-smoke-evaporate 17s linear infinite;
+}
+
+@keyframes vapor-smoke-drift {
+  from {
+    transform: translate3d(-2%, -1.2%, 0) scale(0.99);
+  }
+  to {
+    transform: translate3d(1.8%, 1%, 0) scale(1.05);
+  }
+}
+
+@keyframes vapor-ember-burn {
+  0% {
+    opacity: 0.08;
+    transform: translate3d(0, 6%, 0) scale(0.92);
+  }
+  24% {
+    opacity: 0.32;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  62% {
+    opacity: 0.22;
+    transform: translate3d(0, -3%, 0) scale(1.05);
+  }
+  100% {
+    opacity: 0.05;
+    transform: translate3d(0, -10%, 0) scale(1.1);
+  }
+}
+
+@keyframes vapor-smoke-evaporate {
+  0% {
+    opacity: 0.11;
+    transform: translate3d(-2%, 7%, 0) scale(0.95);
+  }
+  20% {
+    opacity: 0.38;
+    transform: translate3d(0, 2%, 0) scale(1.02);
+  }
+  64% {
+    opacity: 0.24;
+    transform: translate3d(1.5%, -6%, 0) scale(1.08);
+  }
+  100% {
+    opacity: 0.08;
+    transform: translate3d(3%, -14%, 0) scale(1.14);
   }
 }

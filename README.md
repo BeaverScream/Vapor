@@ -6,10 +6,12 @@ Vapor is a high-performance, zero-persistence communication utility designed for
 ---
 
 ### 🌟 Core Philosophy: "Easy Use, Easy Drop"
-* **Zero Onboarding:** No accounts, no apps, no phone numbers. Access is via a single, unique URL.
-* **Host-Sovereign Volatility:** The room exists only as long as the host is active. When the host leaves, the server's RAM is wiped, and the "Vapor" trail disappears.
-* **Password-Protected Entry:** Every room is secured by a host-defined password. Access is validated against the server's volatile memory, ensuring targeted privacy without permanent storage.
-* **Aesthetic Privacy:** A minimalist, GPU-accelerated UI featuring a "smoky" glassmorphism design that reflects the ephemeral nature of your data.
+* **Zero Onboarding:** No accounts, no apps, no phone numbers. Access is instant with a room link and password.
+* **Easy Use:** Create a room by entering a room name and password. Join by entering the same room name and matching password.
+* **Zero Persistence:** Room/session state lives only in server RAM and is removed when the room ends. Each room is limited to a maximum 2-hour lifetime.
+* **Host-Sovereign Volatility:** The host controls room lifetime. If the host leaves (or misses reconnect grace), the room is destroyed.
+* **Password-Protected Entry:** Guests join with room ID + host-defined password.
+* **Privacy Protected:** The server is only used to connect participants. Messages and file transfers are shared directly between users.
 
 ---
 
@@ -18,16 +20,17 @@ Built to be lightweight, type-safe, and professional:
 
 * **Frontend:** **React + TypeScript** (Vite-powered) for a lightning-fast, crash-resistant user experience.
 * **Styling:** **Tailwind CSS** with GPU-accelerated background animations (mist/smoke effect).
-* **Backend:** **Node.js + Express** (Stateless/No Database) to ensure zero data retention.
+* **Backend:** **Node.js + Express + TypeScript** (Stateless/No Database) to ensure zero data retention.
 * **Real-time:** **Socket.io** for signaling and instant group coordination.
 * **Data Transfer:** **WebRTC Data Channels** (P2P) for high-speed, direct device-to-device file sharing.
+* **Admin Observability:** Optional **Socket.IO Admin UI** + RAM-only metrics endpoint for operational visibility.
 
 ---
 
 ### 🛡️ Privacy & Encryption
-* **End-to-End Encryption (E2EE):** File transfers and P2P data use DTLS/SRTP protocols. Data moves directly between browsers, meaning the server never "sees" your files.
+* **Peer Encryption:** WebRTC data channels use DTLS/SRTP. Data moves directly between browsers, so the server does not relay your files.
 * **Encrypted Signaling:** All room coordination and initial chat messages are wrapped in **TLS/SSL (HTTPS/WSS)**, protecting users on public Wi-Fi.
-* **Stateless Auth:** Passwords live only in the server's RAM. There is no database to breach, and no logs are generated.
+* **Stateless Auth:** Password verification data lives only in server RAM. There is no database history to breach.
 
 ---
 
@@ -35,23 +38,12 @@ Built to be lightweight, type-safe, and professional:
 
 | Feature | Traditional Apps (Zoom/Teams) | **Vapor** |
 | :--- | :--- | :--- |
-| **Setup** | Heavy (Account/App) | **Instant (URL-only)** |
+| **Setup** | Heavy (Account/App) | **Instant (Room + Password)** |
 | **Persistence** | Permanent Logs/History | **Volatile (Self-destructs)** |
 | **Data Privacy** | Server-side storage | **P2P (Client-to-Client)** |
 | **Access** | Email Invites/Links | **Password-Locked Bridge** |
 
 ---
-
-### 🚀 Roadmap
-- [ ] **Phase 1:** Core Socket.io signaling, Password-entry logic, and "Smoke" UI.
-- [ ] **Phase 2:** P2P WebRTC Data Channels for multi-user file dropping.
-- [ ] **Phase 3:** Mesh-based video/audio for up to 4 participants.
-
----
-
-### 📦 Project Structure
-- `frontend/` → Vite + React + TypeScript
-- `backend/` → Node.js + Express + Socket.io (stateless)
 
 ### ▶️ Run Locally (without Docker)
 1. Install root utilities:
@@ -62,7 +54,11 @@ Built to be lightweight, type-safe, and professional:
 	```bash
 	cd backend && npm install
 	```
-3. Start both frontend and backend from the project root:
+3. (Optional) Type-check backend:
+	```bash
+	cd backend && npm run typecheck
+	```
+4. Start both frontend and backend from the project root:
 	```bash
 	npm run dev
 	```
@@ -76,9 +72,32 @@ npm run docker:up
 
 - Frontend: `http://localhost:5173`
 - Backend health: `http://localhost:3001/health`
-
 Stop containers:
 
 ```bash
 npm run docker:down
 ```
+
+<!-- ### 🔎 Admin Dashboard (Optional)
+
+Vapor includes a separate backend admin module for live operational metrics while preserving zero-persistence behavior.
+
+- JSON metrics endpoint: `GET /admin/metrics`
+- Socket-level dashboard: Socket.IO Admin UI
+
+Required backend environment variables:
+
+- `ADMIN_METRICS_TOKEN` for `/admin/metrics` (send as `x-admin-token` header)
+- `ADMIN_UI_USERNAME` and `ADMIN_UI_PASSWORD` to enable Socket.IO Admin UI basic auth
+- `ADMIN_UI_ORIGIN` (optional, default: `https://admin.socket.io`)
+
+Example:
+
+```bash
+ADMIN_METRICS_TOKEN=replace-me
+ADMIN_UI_USERNAME=admin
+ADMIN_UI_PASSWORD=strong-secret
+ADMIN_UI_ORIGIN=https://admin.socket.io
+```
+
+The admin module exposes RAM usage, active users, active rooms, cumulative joins, uptime, and aggregate connection-hours. No room credentials, signaling payloads, or message/file content are persisted. -->

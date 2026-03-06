@@ -4,13 +4,33 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/index.js",
-    "start": "node src/index.js"
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test:unit": "node --import tsx --test \"tests/**/*.unit.test.ts\"",
+    "test:integration": "node --import tsx --test \"tests/**/*.integration.test.ts\"",
+    "test:policy": "node --import tsx --test \"tests/**/*.policy.test.ts\"",
+    "test:socket": "node --import tsx --test tests/socket.integration.test.ts",
+    "test:security": "node --import tsx --test tests/security.policy.test.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
+    "@socket.io/admin-ui": "^0.5.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.19.0",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.6",
+    "eslint": "^9.19.0",
+    "globals": "^15.14.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.22.0"
   }
 }
