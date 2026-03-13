@@ -22,7 +22,11 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+    "paths": {
+      "@shared": ["../shared/index.ts"],
+      "@shared/*": ["../shared/*"]
+    }
   },
-  "include": ["src"]
+  "include": ["src", "../shared/**/*.ts"]
 }

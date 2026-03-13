@@ -4,6 +4,7 @@ import {
   CLIENT_EVENTS,
   SERVER_EVENTS,
   type CreateRoomRequest,
+  type HostReconnectGracePayload,
   type JoinRoomRequest,
   type LeaveRoomRequest,
   type PeerJoinedPayload,
@@ -27,6 +28,8 @@ export function createRoomSocketClient(signalingUrl: string = SIGNALING_URL): Ro
     onRoomJoined: (handler) => socket.on(SERVER_EVENTS.ROOM_JOINED, handler),
     onPeerJoined: (handler) => socket.on(SERVER_EVENTS.PEER_JOINED, handler),
     onPeerLeft: (handler) => socket.on(SERVER_EVENTS.PEER_LEFT, handler),
+    onHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) =>
+      socket.on(SERVER_EVENTS.HOST_RECONNECT_GRACE, handler),
     onRoomDestroyed: (handler) => socket.on(SERVER_EVENTS.ROOM_DESTROYED, handler),
     onError: (handler) => socket.on(SERVER_EVENTS.ERROR, handler),
     offConnect: (handler) => socket.off('connect', handler),
@@ -35,6 +38,8 @@ export function createRoomSocketClient(signalingUrl: string = SIGNALING_URL): Ro
     offRoomJoined: (handler) => socket.off(SERVER_EVENTS.ROOM_JOINED, handler),
     offPeerJoined: (handler) => socket.off(SERVER_EVENTS.PEER_JOINED, handler),
     offPeerLeft: (handler) => socket.off(SERVER_EVENTS.PEER_LEFT, handler),
+    offHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) =>
+      socket.off(SERVER_EVENTS.HOST_RECONNECT_GRACE, handler),
     offRoomDestroyed: (handler) => socket.off(SERVER_EVENTS.ROOM_DESTROYED, handler),
     offError: (handler) => socket.off(SERVER_EVENTS.ERROR, handler),
     emitCreateRoom: (payload: CreateRoomRequest) => socket.emit(CLIENT_EVENTS.CREATE_ROOM, payload),

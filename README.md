@@ -7,11 +7,26 @@ Vapor is a high-performance, zero-persistence communication utility designed for
 
 ### 🌟 Core Philosophy: "Easy Use, Easy Drop"
 * **Zero Onboarding:** No accounts, no apps, no phone numbers. Access is instant with a room link and password.
-* **Easy Use:** Create a room by entering a room name and password. Join by entering the same room name and matching password.
+* **Easy Use:** Create a room with a password, share the returned room ID, then join with the exact same room ID (case-sensitive) and matching password.
 * **Zero Persistence:** Room/session state lives only in server RAM and is removed when the room ends. Each room is limited to a maximum 2-hour lifetime.
 * **Host-Sovereign Volatility:** The host controls room lifetime. If the host leaves (or misses reconnect grace), the room is destroyed.
 * **Password-Protected Entry:** Guests join with room ID + host-defined password.
 * **Privacy Protected:** The server is only used to connect participants. Messages and file transfers are shared directly between users.
+
+### ❓ FAQ
+
+**Why did my room end even before 2 hours?**  
+Vapor enforces a maximum 2-hour TTL, but rooms can end earlier by lifecycle policy:
+- host leaves (`host_left`),
+- host reconnect grace expires (`host_grace_expired`),
+- host-only room times out before any guest joins (`solo_timeout_expired`),
+- or full TTL is reached (`room_ttl_expired`).
+
+**What happens after repeated wrong password attempts?**  
+Join-attempt policy is enforced per room + subject key:
+- attempts 1-3: rejected as `INVALID_PASSWORD` with no cooldown,
+- attempts 4-5: 10-minute cooldown (attempts during cooldown return `RATE_LIMITED`),
+- attempts greater than 5: strict lockout until room destruction (`RATE_LIMITED`).
 
 ---
 

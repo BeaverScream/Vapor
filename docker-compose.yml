@@ -7,8 +7,10 @@ services:
       - "5173:5173"
     environment:
       - CHOKIDAR_USEPOLLING=true
+      - SHARED_PATH=/app/shared
     volumes:
       - ./frontend:/app
+      - ./shared:/app/shared
       - frontend_node_modules:/app/node_modules
     command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
     depends_on:

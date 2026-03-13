@@ -1,25 +1,46 @@
+import {
+  CLIENT_EVENT_NAMES,
+  SERVER_EVENT_NAMES,
+  SIGNALING_ERROR_CODES,
+  type CreateRoomPayload,
+  type HostReconnectGracePayload as SharedHostReconnectGracePayload,
+  type JoinRoomPayload,
+  type PeerJoinedPayload as SharedPeerJoinedPayload,
+  type PeerLeftPayload as SharedPeerLeftPayload,
+  type RoomCreatedPayload as SharedRoomCreatedPayload,
+  type RoomDestroyedPayload as SharedRoomDestroyedPayload,
+  type RoomDestroyedReason as SharedRoomDestroyedReason,
+  type RoomJoinedPayload as SharedRoomJoinedPayload,
+  type SocketErrorPayload as SharedSocketErrorPayload,
+} from '@shared'
+
 export const CLIENT_EVENTS = {
-  CREATE_ROOM: 'create_room',
-  JOIN_ROOM: 'join_room',
-  LEAVE_ROOM: 'leave_room',
+  CREATE_ROOM: CLIENT_EVENT_NAMES.CREATE_ROOM,
+  JOIN_ROOM: CLIENT_EVENT_NAMES.JOIN_ROOM,
+  LEAVE_ROOM: CLIENT_EVENT_NAMES.LEAVE_ROOM,
+  ROOM_PASSWORD_UPDATE: CLIENT_EVENT_NAMES.ROOM_PASSWORD_UPDATE,
 } as const
 
 export const SERVER_EVENTS = {
-  ROOM_CREATED: 'room_created',
-  ROOM_JOINED: 'room_joined',
-  PEER_JOINED: 'peer_joined',
-  PEER_LEFT: 'peer_left',
-  ROOM_DESTROYED: 'room_destroyed',
-  ERROR: 'error',
+  ROOM_CREATED: SERVER_EVENT_NAMES.ROOM_CREATED,
+  ROOM_JOINED: SERVER_EVENT_NAMES.ROOM_JOINED,
+  PEER_JOINED: SERVER_EVENT_NAMES.PEER_JOINED,
+  PEER_LEFT: SERVER_EVENT_NAMES.PEER_LEFT,
+  HOST_RECONNECT_GRACE: SERVER_EVENT_NAMES.HOST_RECONNECT_GRACE,
+  ROOM_PASSWORD_UPDATED: SERVER_EVENT_NAMES.ROOM_PASSWORD_UPDATED,
+  ROOM_DESTROYED: SERVER_EVENT_NAMES.ROOM_DESTROYED,
+  ERROR: SERVER_EVENT_NAMES.ERROR,
 } as const
 
 export type ErrorCode =
-  | 'ROOM_NOT_FOUND'
-  | 'ROOM_FULL'
-  | 'ROOM_EXPIRED'
-  | 'INVALID_PASSWORD'
-  | 'RATE_LIMITED'
+  | typeof SIGNALING_ERROR_CODES.ROOM_NOT_FOUND
+  | typeof SIGNALING_ERROR_CODES.ROOM_FULL
+  | typeof SIGNALING_ERROR_CODES.ROOM_EXPIRED
+  | typeof SIGNALING_ERROR_CODES.INVALID_PASSWORD
+  | typeof SIGNALING_ERROR_CODES.RATE_LIMITED
   | 'UNKNOWN'
+
+export type RoomDestroyedReason = SharedRoomDestroyedReason
 
 export type LobbyStatus = 'idle' | 'submitting' | 'error'
 
@@ -31,56 +52,30 @@ export type SocketState = 'connecting' | 'connected' | 'disconnected'
 
 export interface Participant {
   participantId: string
+  isHost: boolean
 }
 
-export interface RoomCreatedPayload {
-  roomId: string
-  participantId: string
-  reconnectToken: null
-  expiresAt: null
-  participantCount: number
-}
+export type RoomCreatedPayload = SharedRoomCreatedPayload
 
-export interface CreateRoomRequest {
-  password: string
-}
+export interface CreateRoomRequest extends Required<CreateRoomPayload> {}
 
-export interface JoinRoomRequest {
-  roomId: string
-  password: string
-}
+export interface JoinRoomRequest extends Required<JoinRoomPayload> {}
 
 export interface LeaveRoomRequest {
   roomId: string
 }
 
-export interface RoomJoinedPayload {
-  roomId: string
-  participantId: string
-  peers: Participant[]
-  reconnectToken: null
-  expiresAt: null
-  participantCount: number
-}
+export type RoomJoinedPayload = SharedRoomJoinedPayload
 
-export interface PeerJoinedPayload {
-  participantId: string
-  participantCount: number
-}
+export type PeerJoinedPayload = SharedPeerJoinedPayload
 
-export interface PeerLeftPayload {
-  participantId: string
-  reason: 'disconnect'
-  participantCount: number
-}
+export type PeerLeftPayload = SharedPeerLeftPayload
 
-export interface SocketErrorPayload {
-  code?: string
-}
+export type HostReconnectGracePayload = SharedHostReconnectGracePayload
 
-export interface RoomDestroyedPayload {
-  reason?: string
-}
+export type SocketErrorPayload = SharedSocketErrorPayload
+
+export type RoomDestroyedPayload = SharedRoomDestroyedPayload
 
 export interface RoomSessionState {
   lobbyMode: LobbyMode
@@ -94,8 +89,11 @@ export interface RoomSessionState {
   activeRoomId: string | null
   participants: Participant[]
   participantCount: number
+  hostReconnectGraceDeadlineAt: number | null
   socketState: SocketState
   copyFeedback: string | null
+  joinRateLimitUntil: number | null
+  joinRateLimitRoomId: string | null
 }
 
 export interface RoomSessionActions {
@@ -115,6 +113,7 @@ export interface RoomSocketClient {
   onRoomJoined: (handler: (payload: RoomJoinedPayload) => void) => void
   onPeerJoined: (handler: (payload: PeerJoinedPayload) => void) => void
   onPeerLeft: (handler: (payload: PeerLeftPayload) => void) => void
+  onHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) => void
   onRoomDestroyed: (handler: (payload: RoomDestroyedPayload) => void) => void
   onError: (handler: (payload: SocketErrorPayload) => void) => void
   offConnect: (handler: () => void) => void
@@ -123,6 +122,7 @@ export interface RoomSocketClient {
   offRoomJoined: (handler: (payload: RoomJoinedPayload) => void) => void
   offPeerJoined: (handler: (payload: PeerJoinedPayload) => void) => void
   offPeerLeft: (handler: (payload: PeerLeftPayload) => void) => void
+  offHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) => void
   offRoomDestroyed: (handler: (payload: RoomDestroyedPayload) => void) => void
   offError: (handler: (payload: SocketErrorPayload) => void) => void
   emitCreateRoom: (payload: CreateRoomRequest) => void

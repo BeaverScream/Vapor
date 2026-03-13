@@ -4,7 +4,11 @@ export function hasParticipant(participants: Participant[], participantId: strin
   return participants.some((participant) => participant.participantId === participantId)
 }
 
-export function getRoomStatus(participantCount: number): string {
+export function getRoomStatus(participantCount: number, hostReconnectGraceDeadlineAt: number | null): string {
+  if (hostReconnectGraceDeadlineAt !== null) {
+    return 'Host disconnected. Waiting for host to reconnect…'
+  }
+
   return participantCount >= 2 ? 'Connected' : 'Waiting for peers…'
 }
 

@@ -38,3 +38,4 @@ docker-compose.override.yml
 docs
 Todo.md
 Reference/
+.geminiignore

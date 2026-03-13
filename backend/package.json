@@ -16,6 +16,7 @@
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
     "@socket.io/admin-ui": "^0.5.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { UI_COPY } from './constants'
-import { getErrorMessage, mapErrorCode } from './error-copy'
+import { JOIN_RATE_LIMIT_COOLDOWN_MS, UI_COPY } from './constants'
+import { getErrorMessage, getJoinRateLimitedMessage, mapErrorCode } from './error-copy'
+import { SIGNALING_ERROR_CODES } from '@shared'
 import { getConnectionStatusText, getRoomStatus } from './participant-utils'
 import { createRoomSocketClient } from './room-socket-client'
 import {
   createInitialRoomSessionState,
   resetToLobby,
   withCopyFeedback,
+  withHostReconnectGrace,
   withLobbyError,
   withLobbyMode,
   withLobbySubmitting,
+  withJoinRateLimitCleared,
+  withJoinRateLimited,
   withPasswordInput,
   withPeerJoined,
   withPeerLeft,
@@ -20,6 +24,7 @@ import {
   withSocketState,
 } from './state-utils'
 import {
+  type HostReconnectGracePayload,
   type PeerJoinedPayload,
   type PeerLeftPayload,
   type RoomCreatedPayload,
@@ -47,6 +52,8 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   derived: {
     lobbyMode: RoomSessionState['lobbyMode']
     primaryActionLabel: string
+    isPrimaryDisabled: boolean
+    joinRateLimitHint: string | null
     roomStatus: string
     connectionText: string
   }
@@ -57,7 +64,22 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   } = dependencies
 
   const [state, setState] = useState<RoomSessionState>(createInitialRoomSessionState)
+  const [rateLimitTick, setRateLimitTick] = useState<number>(() => Date.now())
   const socketRef = useRef<RoomSocketClient | null>(null)
+
+  const joinRateLimitRemainingMs = useMemo(() => {
+    if (!state.joinRateLimitUntil) {
+      return 0
+    }
+
+    return Math.max(state.joinRateLimitUntil - rateLimitTick, 0)
+  }, [state.joinRateLimitUntil, rateLimitTick])
+
+  const isJoinRateLimited =
+    state.lobbyMode === 'join' &&
+    state.joinRateLimitRoomId !== null &&
+    state.joinRateLimitRoomId === state.roomIdInput &&
+    joinRateLimitRemainingMs > 0
 
   useEffect(() => {
     const socket = createSocketClient()
@@ -88,12 +110,29 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       setState((previous) => withPeerLeft(previous, payload))
     }
 
-    const onRoomDestroyed = (_payload: RoomDestroyedPayload): void => {
-      setState((previous) => withRoomEnded(previous))
+    const onHostReconnectGrace = (payload: HostReconnectGracePayload): void => {
+      setState((previous) => withHostReconnectGrace(previous, payload.deadlineAt))
+    }
+
+    const onRoomDestroyed = (payload: RoomDestroyedPayload): void => {
+      setState((previous) => withRoomEnded(previous, payload.reason))
     }
 
     const onError = (payload: SocketErrorPayload): void => {
-      setState((previous) => withLobbyError(previous, getErrorMessage(mapErrorCode(payload.code))))
+      setState((previous) => {
+        const errorCode = mapErrorCode(payload.code)
+
+        if (errorCode === SIGNALING_ERROR_CODES.RATE_LIMITED && previous.lobbyMode === 'join') {
+          return withJoinRateLimited(
+            previous,
+            Date.now() + JOIN_RATE_LIMIT_COOLDOWN_MS,
+            previous.roomIdInput,
+            getJoinRateLimitedMessage(JOIN_RATE_LIMIT_COOLDOWN_MS),
+          )
+        }
+
+        return withLobbyError(previous, getErrorMessage(errorCode))
+      })
     }
 
     socket.onConnect(onConnect)
@@ -102,6 +141,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     socket.onRoomJoined(onRoomJoined)
     socket.onPeerJoined(onPeerJoined)
     socket.onPeerLeft(onPeerLeft)
+    socket.onHostReconnectGrace(onHostReconnectGrace)
     socket.onRoomDestroyed(onRoomDestroyed)
     socket.onError(onError)
 
@@ -112,12 +152,35 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       socket.offRoomJoined(onRoomJoined)
       socket.offPeerJoined(onPeerJoined)
       socket.offPeerLeft(onPeerLeft)
+      socket.offHostReconnectGrace(onHostReconnectGrace)
       socket.offRoomDestroyed(onRoomDestroyed)
       socket.offError(onError)
       socket.disconnect()
       socketRef.current = null
     }
   }, [createSocketClient])
+
+  useEffect(() => {
+    if (!state.joinRateLimitUntil) {
+      return
+    }
+
+    const intervalHandle = window.setInterval(() => {
+      setRateLimitTick(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(intervalHandle)
+    }
+  }, [state.joinRateLimitUntil])
+
+  useEffect(() => {
+    if (!state.joinRateLimitUntil || joinRateLimitRemainingMs > 0) {
+      return
+    }
+
+    setState((previous) => withJoinRateLimitCleared(previous))
+  }, [joinRateLimitRemainingMs, state.joinRateLimitUntil])
 
   useEffect(() => {
     if (!state.copyFeedback) {
@@ -134,6 +197,11 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   }, [state.copyFeedback])
 
   const submitLobby = (): void => {
+    if (isJoinRateLimited) {
+      setState((previous) => withLobbyError(previous, getJoinRateLimitedMessage(joinRateLimitRemainingMs)))
+      return
+    }
+
     if (state.socketState !== 'connected') {
       setState((previous) => withLobbyError(previous, UI_COPY.CONNECTING_RETRY))
       return
@@ -142,6 +210,11 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     const socket = socketRef.current
     if (!socket) {
       setState((previous) => withLobbyError(previous, UI_COPY.GENERIC_ERROR))
+      return
+    }
+
+    if (state.passwordInput.trim().length === 0) {
+      setState((previous) => withLobbyError(previous, getErrorMessage(SIGNALING_ERROR_CODES.INVALID_PASSWORD)))
       return
     }
 
@@ -182,7 +255,12 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   }
 
   const primaryActionLabel = state.lobbyMode === 'create' ? 'Create room' : 'Join room'
-  const roomStatus = useMemo(() => getRoomStatus(state.participantCount), [state.participantCount])
+  const isPrimaryDisabled = state.lobbyStatus === 'submitting' || isJoinRateLimited
+  const joinRateLimitHint = isJoinRateLimited ? getJoinRateLimitedMessage(joinRateLimitRemainingMs) : null
+  const roomStatus = useMemo(
+    () => getRoomStatus(state.participantCount, state.hostReconnectGraceDeadlineAt),
+    [state.hostReconnectGraceDeadlineAt, state.participantCount],
+  )
   const connectionText = useMemo(() => getConnectionStatusText(state.socketState), [state.socketState])
 
   return {
@@ -199,6 +277,8 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     derived: {
       lobbyMode: state.lobbyMode,
       primaryActionLabel,
+      isPrimaryDisabled,
+      joinRateLimitHint,
       roomStatus,
       connectionText,
     },

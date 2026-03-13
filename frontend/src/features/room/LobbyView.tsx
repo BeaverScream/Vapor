@@ -11,6 +11,8 @@ interface LobbyViewProps {
   roomIdInput: string
   passwordInput: string
   isSubmitting: boolean
+  isPrimaryDisabled: boolean
+  joinRateLimitHint: string | null
   errorMessage: string | null
   primaryActionLabel: string
   onLobbyModeChange: (mode: LobbyMode) => void
@@ -24,6 +26,8 @@ export function LobbyView({
   roomIdInput,
   passwordInput,
   isSubmitting,
+  isPrimaryDisabled,
+  joinRateLimitHint,
   errorMessage,
   primaryActionLabel,
   onLobbyModeChange,
@@ -96,14 +100,20 @@ export function LobbyView({
               type="password"
               value={passwordInput}
               onChange={(event) => onPasswordChange(event.target.value)}
-              placeholder="Optional (Phase 0)"
+              placeholder="Required"
               autoComplete="off"
             />
           </div>
 
-          <Button type="submit" disabled={isSubmitting} className="w-full">
+          <Button type="submit" disabled={isPrimaryDisabled} className="w-full">
             {isSubmitting ? 'Connecting…' : primaryActionLabel}
           </Button>
+
+          {joinRateLimitHint ? (
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              {joinRateLimitHint}
+            </p>
+          ) : null}
 
           {errorMessage && (
             <Alert className="border-destructive/40 bg-destructive/10 text-destructive-foreground">

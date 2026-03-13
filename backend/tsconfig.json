@@ -3,6 +3,11 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@shared": ["../shared/index.ts"],
+      "@shared/*": ["../shared/*"]
+    },
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
@@ -10,5 +15,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts"]
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "../shared/**/*.ts"]
 }

@@ -52,7 +52,11 @@ export function RoomView({
               <span>{participant.participantId}</span>
               {participant.participantId === participantId ? (
                 <span className="ml-auto rounded-full border border-white/30 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                  You
+                  {participant.isHost ? 'You (Host)' : 'You'}
+                </span>
+              ) : participant.isHost ? (
+                <span className="ml-auto rounded-full border border-white/30 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Host
                 </span>
               ) : null}
             </li>
