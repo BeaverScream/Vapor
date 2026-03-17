@@ -8,6 +8,7 @@ const BACKEND_SRC_ROOT = path.resolve(process.cwd(), "src");
 const SIGNALING_CONTRACTS_FILE = path.resolve(process.cwd(), "src/signaling/contracts.ts");
 const SOCKET_HANDLERS_FILE = path.resolve(process.cwd(), "src/signaling/registerSocketHandlers.ts");
 const SHARED_EVENTS_FILE = path.resolve(process.cwd(), "../shared/events.ts");
+const SHARED_PAYLOADS_FILE = path.resolve(process.cwd(), "../shared/payloads.ts");
 const SHARED_REASONS_FILE = path.resolve(process.cwd(), "../shared/reasons.ts");
 
 const FORBIDDEN_SECRET_PATTERNS: RegExp[] = [
@@ -100,6 +101,7 @@ test("P0-RS-004: backend source avoids persistence APIs/libraries in Phase 0 run
 test("P1-EV-008 / VP-1.1-AC1: backend signaling event contract names are canonical", async () => {
   const contracts = await fs.readFile(SIGNALING_CONTRACTS_FILE, "utf8");
   const sharedEvents = await fs.readFile(SHARED_EVENTS_FILE, "utf8");
+  const sharedPayloads = await fs.readFile(SHARED_PAYLOADS_FILE, "utf8");
 
   // contracts.ts must delegate to shared constants (not hardcode wire strings)
   expectContains(contracts, "CLIENT_EVENT_NAMES.CREATE_ROOM", "create_room sourced from shared");
@@ -121,6 +123,9 @@ test("P1-EV-008 / VP-1.1-AC1: backend signaling event contract names are canonic
   expectContains(sharedEvents, 'PEER_LEFT: "peer_left"', "shared peer_left literal");
   expectContains(sharedEvents, 'ROOM_DESTROYED: "room_destroyed"', "shared room_destroyed literal");
   expectContains(sharedEvents, 'ERROR: "error"', "shared error literal");
+  expectContains(sharedPayloads, "export type RoomCreatedPayload = {", "shared room_created payload contract");
+  expectContains(sharedPayloads, "export type RoomJoinedPayload = {", "shared room_joined payload contract");
+  expectContains(sharedPayloads, "hostId: string", "shared explicit hostId contract field");
 });
 
 test("P1-EV-009 / VP-1.1-AC2: backend does not expose legacy destroy reason alias", async () => {

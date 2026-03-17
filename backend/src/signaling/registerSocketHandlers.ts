@@ -533,6 +533,7 @@ export function registerSocketHandlers({
       const response: RoomCreatedPayload = {
         roomId: room.roomId,
         participantId,
+        hostId: room.hostId,
         reconnectToken,
         expiresAt: policy.expiresAt,
         participantCount: room.participants.size
@@ -634,6 +635,7 @@ export function registerSocketHandlers({
       const roomJoinedPayload: RoomJoinedPayload = {
         roomId,
         participantId: joined.participantId,
+        hostId: joined.room.hostId,
         peers: joined.peers,
         reconnectToken,
         expiresAt: policy?.expiresAt ?? room.createdAt + ROOM_MAX_DURATION_MS,
@@ -714,6 +716,7 @@ export function registerSocketHandlers({
       const roomJoinedPayload: RoomJoinedPayload = {
         roomId,
         participantId: reconnectRecord.participantId,
+        hostId: room.hostId,
         peers,
         reconnectToken,
         expiresAt: policy?.expiresAt ?? room.createdAt + ROOM_MAX_DURATION_MS,

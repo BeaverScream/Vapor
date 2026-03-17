@@ -32,24 +32,6 @@ export function createInitialRoomSessionState(): RoomSessionState {
   }
 }
 
-function deriveHostParticipantId(state: RoomSessionState, payload: RoomJoinedPayload): string | null {
-  const existingHostParticipantId = state.participants.find((participant) => participant.isHost)?.participantId
-
-  if (existingHostParticipantId) {
-    return existingHostParticipantId
-  }
-
-  if (payload.peers.length === 1) {
-    return payload.peers[0]?.participantId ?? null
-  }
-
-  if (payload.peers.length > 1) {
-    return payload.peers[0]?.participantId ?? null
-  }
-
-  return payload.participantId
-}
-
 export function withSocketState(state: RoomSessionState, socketState: RoomSessionState['socketState']): RoomSessionState {
   return {
     ...state,
@@ -66,7 +48,7 @@ export function withRoomCreated(state: RoomSessionState, payload: RoomCreatedPay
     participantId: payload.participantId,
     activeRoomId: payload.roomId,
     expiresAt: payload.expiresAt,
-    participants: [{ participantId: payload.participantId, isHost: true }],
+    participants: [{ participantId: payload.participantId, isHost: payload.participantId === payload.hostId }],
     participantCount: payload.participantCount,
     hostReconnectGraceDeadlineAt: null,
     copyFeedback: null,
@@ -76,15 +58,13 @@ export function withRoomCreated(state: RoomSessionState, payload: RoomCreatedPay
 }
 
 export function withRoomJoined(state: RoomSessionState, payload: RoomJoinedPayload): RoomSessionState {
-  const hostParticipantId = deriveHostParticipantId(state, payload)
-
   const nextParticipants: Participant[] = payload.peers.map((participant) => ({
     participantId: participant.participantId,
-    isHost: participant.participantId === hostParticipantId,
+    isHost: participant.participantId === payload.hostId,
   }))
 
   if (!hasParticipant(nextParticipants, payload.participantId)) {
-    nextParticipants.push({ participantId: payload.participantId, isHost: payload.participantId === hostParticipantId })
+    nextParticipants.push({ participantId: payload.participantId, isHost: payload.participantId === payload.hostId })
   }
 
   return {

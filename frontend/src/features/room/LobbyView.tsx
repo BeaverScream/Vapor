@@ -40,7 +40,7 @@ export function LobbyView({
       <CardHeader className="text-center">
         <CardTitle className="text-2xl font-bold tracking-tight">Vapor</CardTitle>
         <CardDescription className="text-sm text-muted-foreground">
-          Private room. No history.
+          No accounts. No history.
         </CardDescription>
       </CardHeader>
       <CardContent>

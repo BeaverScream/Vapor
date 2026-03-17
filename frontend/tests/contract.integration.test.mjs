@@ -53,6 +53,7 @@ test('P0-HR-002: required payload keys for room transitions remain present in FE
   expectContains(content, 'export type PeerJoinedPayload = SharedPeerJoinedPayload', 'PeerJoinedPayload shared alias')
 
   expectContains(sharedPayloads, 'export type RoomCreatedPayload = {', 'shared RoomCreatedPayload type')
+  expectContains(sharedPayloads, 'hostId: string', 'shared hostId field on room lifecycle payloads')
   expectContains(sharedPayloads, 'expiresAt: number', 'shared expiresAt number field')
   expectContains(sharedPayloads, 'participantCount: number', 'shared participantCount field')
 })
@@ -113,10 +114,22 @@ test('VP-2.4: frontend error layer handles RATE_LIMITED code and surfaces join-a
 test('VP-1.5-AC1/AC2: room participant model and UI expose explicit host labeling', async () => {
   const types = await readFile(typesFile, 'utf8')
   const roomView = await readFile(roomViewFile, 'utf8')
+  const stateUtils = await readFile(stateUtilsFile, 'utf8')
 
   expectContains(types, 'isHost: boolean', 'participant host identity field')
   expectContains(roomView, 'Host', 'host badge text')
   expectContains(roomView, 'You (Host)', 'self-host explicit badge text')
+  expectContains(stateUtils, 'participant.participantId === payload.hostId', 'host role mapped from explicit hostId payload')
+})
+
+test('VP-1.7: room lifetime text keeps >=10m compact and <10m strict zero-padded mm:ss', async () => {
+  const useRoom = await readFile(useRoomFile, 'utf8')
+
+  expectContains(useRoom, 'if (minutes >= 10)', '>=10 minutes compact branch')
+  expectContains(useRoom, "return `Ends in ${minutes}m`", '>=10 minutes text format')
+  expectContains(useRoom, "minutes.toString().padStart(2, '0')", 'zero-padded minute formatting')
+  expectContains(useRoom, "seconds.toString().padStart(2, '0')", 'zero-padded second formatting')
+  expectContains(useRoom, "return `Ends in ${paddedMinutes}:${paddedSeconds}`", 'strict mm:ss display under 10 minutes')
 })
 
 // ---- Lifecycle ----

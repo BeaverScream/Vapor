@@ -28,6 +28,7 @@ export type SocketErrorPayload = {
 export type RoomCreatedPayload = {
   roomId: string;
   participantId: string;
+  hostId: string;
   reconnectToken: string | null;
   expiresAt: number;
   participantCount: number;
@@ -36,6 +37,7 @@ export type RoomCreatedPayload = {
 export type RoomJoinedPayload = {
   roomId: string;
   participantId: string;
+  hostId: string;
   peers: Array<{ participantId: string }>;
   reconnectToken: string | null;
   expiresAt: number;

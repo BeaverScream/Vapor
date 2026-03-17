@@ -179,17 +179,20 @@ test("P0-CR-001 / P0-JN-002: create + join emits contract payloads and shared ro
   const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as {
     roomId: string;
     participantId: string;
+    hostId: string;
     participantCount: number;
   };
 
   assert.ok(roomCreated);
   assert.equal(roomCreated.roomId, "AbC123");
+  assert.equal(roomCreated.hostId, roomCreated.participantId);
   assert.equal(roomCreated.participantCount, 1);
 
   guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw" });
   const roomJoined = guest.popEvent(SERVER_EVENTS.roomJoined) as {
     roomId: string;
     participantId: string;
+    hostId: string;
     peers: Array<{ participantId: string }>;
     participantCount: number;
   };
@@ -201,6 +204,7 @@ test("P0-CR-001 / P0-JN-002: create + join emits contract payloads and shared ro
   assert.ok(roomJoined);
   assert.ok(peerJoined);
   assert.equal(roomJoined.roomId, "AbC123");
+  assert.equal(roomJoined.hostId, roomCreated.participantId);
   assert.equal(roomJoined.participantCount, 2);
   assert.equal(peerJoined.participantCount, 2);
   assert.equal(roomJoined.peers.length, 1);
@@ -533,6 +537,7 @@ test("VP-1.6-AC3: host resume_session before grace deadline restores host withou
   const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as {
     roomId: string;
     participantId: string;
+    hostId: string;
     reconnectToken: string;
   };
 
@@ -554,12 +559,14 @@ test("VP-1.6-AC3: host resume_session before grace deadline restores host withou
   const resumedRoomJoined = resumedHost.popEvent(SERVER_EVENTS.roomJoined) as {
     roomId: string;
     participantId: string;
+    hostId: string;
     participantCount: number;
   };
 
   assert.ok(resumedRoomJoined, "Expected resumed host to receive room_joined");
   assert.equal(resumedRoomJoined.roomId, roomCreated.roomId);
   assert.equal(resumedRoomJoined.participantId, roomCreated.participantId);
+  assert.equal(resumedRoomJoined.hostId, roomCreated.hostId);
   assert.equal(resumedRoomJoined.participantCount, 2);
 
   const roomDestroyed = guest.popEvent(SERVER_EVENTS.roomDestroyed);
