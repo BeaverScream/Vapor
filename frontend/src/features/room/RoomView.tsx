@@ -8,6 +8,7 @@ interface RoomViewProps {
   participantCount: number
   participants: Participant[]
   roomStatus: string
+  roomLifetimeText: string | null
   copyFeedback: string | null
   onCopyRoomId: () => Promise<void>
   onLeaveRoom: () => void
@@ -19,6 +20,7 @@ export function RoomView({
   participantCount,
   participants,
   roomStatus,
+  roomLifetimeText,
   copyFeedback,
   onCopyRoomId,
   onLeaveRoom,
@@ -28,9 +30,16 @@ export function RoomView({
       <CardHeader className="space-y-2">
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-lg">Room {activeRoomId}</CardTitle>
-          <Button type="button" variant="ghost" size="sm" onClick={onCopyRoomId}>
-            Copy room ID
-          </Button>
+          <div className="flex items-center gap-2">
+            {roomLifetimeText && (
+              <span className="rounded-full border border-white/20 bg-white/5 px-2 py-1 text-[10px] font-medium text-muted-foreground">
+                {roomLifetimeText}
+              </span>
+            )}
+            <Button type="button" variant="ghost" size="sm" onClick={onCopyRoomId}>
+              Copy room ID
+            </Button>
+          </div>
         </div>
         <CardDescription>{roomStatus}</CardDescription>
       </CardHeader>

@@ -81,6 +81,7 @@ function App() {
           participantCount={state.participantCount}
           participants={state.participants}
           roomStatus={derived.roomStatus}
+          roomLifetimeText={derived.roomLifetimeText}
           copyFeedback={state.copyFeedback}
           onCopyRoomId={actions.copyRoomId}
           onLeaveRoom={actions.leaveRoom}

@@ -56,6 +56,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     joinRateLimitHint: string | null
     roomStatus: string
     connectionText: string
+    roomLifetimeText: string | null
   }
 } {
   const {
@@ -63,8 +64,13 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     writeClipboardText = writeDefaultClipboardText,
   } = dependencies
 
+  const createSocketClientRef = useRef(createSocketClient)
+  createSocketClientRef.current = createSocketClient
+
   const [state, setState] = useState<RoomSessionState>(createInitialRoomSessionState)
   const [rateLimitTick, setRateLimitTick] = useState<number>(() => Date.now())
+  const [lifetimeTick, setLifetimeTick] = useState<number>(() => Date.now())
+  const [isInputFocused, setIsInputFocused] = useState(false)
   const socketRef = useRef<RoomSocketClient | null>(null)
 
   const joinRateLimitRemainingMs = useMemo(() => {
@@ -75,6 +81,31 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     return Math.max(state.joinRateLimitUntil - rateLimitTick, 0)
   }, [state.joinRateLimitUntil, rateLimitTick])
 
+  const roomLifetimeRemainingMs = useMemo(() => {
+    if (!state.expiresAt) {
+      return 0
+    }
+
+    return Math.max(state.expiresAt - lifetimeTick, 0)
+  }, [state.expiresAt, lifetimeTick])
+
+  const roomLifetimeText = useMemo(() => {
+    if (roomLifetimeRemainingMs <= 0) {
+      return null
+    }
+
+    const totalSeconds = Math.floor(roomLifetimeRemainingMs / 1000)
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+
+    if (minutes >= 10) {
+      return `Ends in ${minutes}m`
+    }
+
+    const paddedSeconds = seconds.toString().padStart(2, '0')
+    return `Ends in ${minutes}:${paddedSeconds}`
+  }, [roomLifetimeRemainingMs])
+
   const isJoinRateLimited =
     state.lobbyMode === 'join' &&
     state.joinRateLimitRoomId !== null &&
@@ -82,7 +113,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     joinRateLimitRemainingMs > 0
 
   useEffect(() => {
-    const socket = createSocketClient()
+    const socket = createSocketClientRef.current()
 
     socketRef.current = socket
 
@@ -158,7 +189,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       socket.disconnect()
       socketRef.current = null
     }
-  }, [createSocketClient])
+  }, [])
 
   useEffect(() => {
     if (!state.joinRateLimitUntil) {
@@ -195,6 +226,44 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       window.clearTimeout(timeoutHandle)
     }
   }, [state.copyFeedback])
+
+  useEffect(() => {
+    if (!state.expiresAt || state.screen !== 'room') {
+      return
+    }
+
+    const intervalHandle = window.setInterval(() => {
+      setLifetimeTick(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(intervalHandle)
+    }
+  }, [state.expiresAt, state.screen])
+
+  useEffect(() => {
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        setIsInputFocused(true)
+      }
+    }
+
+    const onFocusOut = (event: FocusEvent) => {
+      const target = event.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        setIsInputFocused(false)
+      }
+    }
+
+    document.addEventListener('focusin', onFocusIn)
+    document.addEventListener('focusout', onFocusOut)
+
+    return () => {
+      document.removeEventListener('focusin', onFocusIn)
+      document.removeEventListener('focusout', onFocusOut)
+    }
+  }, [])
 
   const submitLobby = (): void => {
     if (isJoinRateLimited) {
@@ -281,6 +350,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       joinRateLimitHint,
       roomStatus,
       connectionText,
+      roomLifetimeText: isInputFocused ? null : roomLifetimeText,
     },
   }
 }

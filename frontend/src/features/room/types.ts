@@ -87,6 +87,7 @@ export interface RoomSessionState {
   roomEndedMessage: string
   participantId: string | null
   activeRoomId: string | null
+  expiresAt: number | null
   participants: Participant[]
   participantCount: number
   hostReconnectGraceDeadlineAt: number | null

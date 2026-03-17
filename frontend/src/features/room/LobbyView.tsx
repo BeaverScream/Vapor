@@ -1,6 +1,6 @@
 import { Alert, AlertDescription } from '../../components/ui/alert'
 import { Button } from '../../components/ui/button'
-import { Card, CardContent } from '../../components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'   
 import { Input } from '../../components/ui/input'
 import { Label } from '../../components/ui/label'
 import { cn } from '../../lib/utils'
@@ -37,9 +37,15 @@ export function LobbyView({
 }: LobbyViewProps) {
   return (
     <Card className="relative z-10 w-full max-w-md border-white/30 bg-card/75 backdrop-blur-md">
+      <CardHeader className="text-center">
+        <CardTitle className="text-2xl font-bold tracking-tight">Vapor</CardTitle>
+        <CardDescription className="text-sm text-muted-foreground">
+          Private room. No history.
+        </CardDescription>
+      </CardHeader>
       <CardContent>
         <form
-          className="grid gap-3 pt-6"
+          className="grid gap-3"
           onSubmit={(event) => {
             event.preventDefault()
             onSubmit()
