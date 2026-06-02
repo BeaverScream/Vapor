@@ -1,4 +1,6 @@
 import type {
+  ChatConnectionState,
+  ChatMessage,
   Participant,
   PeerJoinedPayload,
   PeerLeftPayload,
@@ -22,8 +24,13 @@ export function createInitialRoomSessionState(): RoomSessionState {
     participantId: null,
     activeRoomId: null,
     expiresAt: null,
+    soloHostDeadlineAt: null,
     participants: [],
     participantCount: 0,
+    chatMessages: [],
+    chatDraft: '',
+    chatConnectionState: 'idle',
+    connectedPeerCount: 0,
     hostReconnectGraceDeadlineAt: null,
     socketState: 'connecting',
     copyFeedback: null,
@@ -48,8 +55,13 @@ export function withRoomCreated(state: RoomSessionState, payload: RoomCreatedPay
     participantId: payload.participantId,
     activeRoomId: payload.roomId,
     expiresAt: payload.expiresAt,
+    soloHostDeadlineAt: payload.soloHostDeadlineAt ?? null,
     participants: [{ participantId: payload.participantId, isHost: payload.participantId === payload.hostId }],
     participantCount: payload.participantCount,
+    chatMessages: [],
+    chatDraft: '',
+    chatConnectionState: 'idle',
+    connectedPeerCount: 0,
     hostReconnectGraceDeadlineAt: null,
     copyFeedback: null,
     joinRateLimitUntil: null,
@@ -75,8 +87,13 @@ export function withRoomJoined(state: RoomSessionState, payload: RoomJoinedPaylo
     participantId: payload.participantId,
     activeRoomId: payload.roomId,
     expiresAt: payload.expiresAt,
+    soloHostDeadlineAt: null,
     participants: nextParticipants,
     participantCount: payload.participantCount,
+    chatMessages: [],
+    chatDraft: '',
+    chatConnectionState: nextParticipants.length > 1 ? 'connecting' : 'idle',
+    connectedPeerCount: 0,
     hostReconnectGraceDeadlineAt: null,
     copyFeedback: null,
     joinRateLimitUntil: null,
@@ -93,6 +110,7 @@ export function withPeerJoined(state: RoomSessionState, payload: PeerJoinedPaylo
     ...state,
     participants,
     participantCount: payload.participantCount,
+    soloHostDeadlineAt: null,
   }
 }
 
@@ -101,6 +119,37 @@ export function withPeerLeft(state: RoomSessionState, payload: PeerLeftPayload):
     ...state,
     participants: state.participants.filter((participant) => participant.participantId !== payload.participantId),
     participantCount: payload.participantCount,
+  }
+}
+
+export function withChatDraft(state: RoomSessionState, chatDraft: string): RoomSessionState {
+  return {
+    ...state,
+    chatDraft,
+  }
+}
+
+export function withAppendedChatMessage(state: RoomSessionState, message: ChatMessage): RoomSessionState {
+  return {
+    ...state,
+    chatMessages: [...state.chatMessages, message],
+  }
+}
+
+export function withConnectedPeerCount(state: RoomSessionState, connectedPeerCount: number): RoomSessionState {
+  return {
+    ...state,
+    connectedPeerCount,
+  }
+}
+
+export function withChatConnectionState(
+  state: RoomSessionState,
+  chatConnectionState: ChatConnectionState,
+): RoomSessionState {
+  return {
+    ...state,
+    chatConnectionState,
   }
 }
 
@@ -182,8 +231,13 @@ export function withRoomEnded(state: RoomSessionState, reason?: string): RoomSes
     participantId: null,
     activeRoomId: null,
     expiresAt: null,
+    soloHostDeadlineAt: null,
     participants: [],
     participantCount: 0,
+    chatMessages: [],
+    chatDraft: '',
+    chatConnectionState: 'idle',
+    connectedPeerCount: 0,
     hostReconnectGraceDeadlineAt: null,
     passwordInput: '',
     copyFeedback: null,
@@ -203,8 +257,13 @@ export function resetToLobby(state: RoomSessionState): RoomSessionState {
     participantId: null,
     activeRoomId: null,
     expiresAt: null,
+    soloHostDeadlineAt: null,
     participants: [],
     participantCount: 0,
+    chatMessages: [],
+    chatDraft: '',
+    chatConnectionState: 'idle',
+    connectedPeerCount: 0,
     hostReconnectGraceDeadlineAt: null,
     passwordInput: '',
     copyFeedback: null,

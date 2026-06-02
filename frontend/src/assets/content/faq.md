@@ -30,4 +30,4 @@ Up to 5 people.
 
 ## Where can I read the full technical design?
 
-For implementation details, see [docs/Vapor System Design.md](../../../docs/Vapor%20System%20Design.md).
+For implementation details, see [docs/Vapor_documents/Vapor System Design.md](../../../../docs/Vapor_documents/Vapor%20System%20Design.md).

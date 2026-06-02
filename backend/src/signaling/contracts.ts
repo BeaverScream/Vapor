@@ -1,65 +1,63 @@
-import {
-  CLIENT_EVENT_NAMES,
-  GUEST_DISCONNECT_GRACE_MS,
-  HOST_DISCONNECT_GRACE_MS,
-  JOIN_INVALID_ATTEMPT_COOLDOWN_MAX,
-  JOIN_INVALID_ATTEMPT_COOLDOWN_MS,
-  JOIN_INVALID_ATTEMPT_NO_COOLDOWN_MAX,
-  ROOM_MAX_DURATION_MS,
-  SOLO_HOST_ROOM_TIMEOUT_MS,
-  SERVER_EVENT_NAMES,
-  SIGNALING_ERROR_CODES,
-  type CreateRoomPayload,
-  type HostReconnectGracePayload,
-  type JoinRoomPayload,
-  type PeerJoinedPayload,
-  type PeerLeftPayload,
-  type ResumeSessionPayload,
-  type RoomCreatedPayload,
-  type RoomDestroyedPayload,
-  type RoomJoinedPayload,
-  type RoomPasswordUpdatePayload,
-  type RoomPasswordUpdatedPayload,
-  type SocketErrorPayload
-} from "@shared";
+import * as shared from "@shared";
+import type { SignalingErrorCode, SocketErrorPayload } from "@shared";
 
 export const CLIENT_EVENTS = {
-  createRoom: CLIENT_EVENT_NAMES.CREATE_ROOM,
-  joinRoom: CLIENT_EVENT_NAMES.JOIN_ROOM,
-  leaveRoom: CLIENT_EVENT_NAMES.LEAVE_ROOM,
-  resumeSession: CLIENT_EVENT_NAMES.RESUME_SESSION,
-  roomPasswordUpdate: CLIENT_EVENT_NAMES.ROOM_PASSWORD_UPDATE
+  createRoom: shared.CLIENT_EVENT_NAMES.CREATE_ROOM,
+  joinRoom: shared.CLIENT_EVENT_NAMES.JOIN_ROOM,
+  leaveRoom: shared.CLIENT_EVENT_NAMES.LEAVE_ROOM,
+  signalOffer: shared.CLIENT_EVENT_NAMES.SIGNAL_OFFER,
+  signalAnswer: shared.CLIENT_EVENT_NAMES.SIGNAL_ANSWER,
+  signalIce: shared.CLIENT_EVENT_NAMES.SIGNAL_ICE,
+  resumeSession: shared.CLIENT_EVENT_NAMES.RESUME_SESSION,
+  nicknameUpdate: shared.CLIENT_EVENT_NAMES.NICKNAME_UPDATE,
+  roomPasswordUpdate: shared.CLIENT_EVENT_NAMES.ROOM_PASSWORD_UPDATE
 } as const;
 
 export const SERVER_EVENTS = {
-  roomCreated: SERVER_EVENT_NAMES.ROOM_CREATED,
-  roomJoined: SERVER_EVENT_NAMES.ROOM_JOINED,
-  peerJoined: SERVER_EVENT_NAMES.PEER_JOINED,
-  peerLeft: SERVER_EVENT_NAMES.PEER_LEFT,
-  hostReconnectGrace: SERVER_EVENT_NAMES.HOST_RECONNECT_GRACE,
-  roomPasswordUpdated: SERVER_EVENT_NAMES.ROOM_PASSWORD_UPDATED,
-  roomDestroyed: SERVER_EVENT_NAMES.ROOM_DESTROYED,
-  error: SERVER_EVENT_NAMES.ERROR
+  roomCreated: shared.SERVER_EVENT_NAMES.ROOM_CREATED,
+  roomJoined: shared.SERVER_EVENT_NAMES.ROOM_JOINED,
+  peerJoined: shared.SERVER_EVENT_NAMES.PEER_JOINED,
+  peerLeft: shared.SERVER_EVENT_NAMES.PEER_LEFT,
+  nicknameUpdated: shared.SERVER_EVENT_NAMES.NICKNAME_UPDATED,
+  signalOffer: shared.SERVER_EVENT_NAMES.SIGNAL_OFFER,
+  signalAnswer: shared.SERVER_EVENT_NAMES.SIGNAL_ANSWER,
+  signalIce: shared.SERVER_EVENT_NAMES.SIGNAL_ICE,
+  hostReconnectGrace: shared.SERVER_EVENT_NAMES.HOST_RECONNECT_GRACE,
+  roomPasswordUpdated: shared.SERVER_EVENT_NAMES.ROOM_PASSWORD_UPDATED,
+  roomDestroyed: shared.SERVER_EVENT_NAMES.ROOM_DESTROYED,
+  error: shared.SERVER_EVENT_NAMES.ERROR
 } as const;
 
 export const ERROR_CODES = {
-  roomNotFound: SIGNALING_ERROR_CODES.ROOM_NOT_FOUND,
-  invalidPassword: SIGNALING_ERROR_CODES.INVALID_PASSWORD,
-  rateLimited: SIGNALING_ERROR_CODES.RATE_LIMITED
+  roomNotFound: shared.SIGNALING_ERROR_CODES.ROOM_NOT_FOUND,
+  roomFull: shared.SIGNALING_ERROR_CODES.ROOM_FULL,
+  roomExpired: shared.SIGNALING_ERROR_CODES.ROOM_EXPIRED,
+  invalidPassword: shared.SIGNALING_ERROR_CODES.INVALID_PASSWORD,
+  hostReconnectWindowExpired: shared.SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED,
+  reconnectTokenStale: shared.SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE,
+  passwordVersionMismatch: shared.SIGNALING_ERROR_CODES.PASSWORD_VERSION_MISMATCH,
+  rateLimited: shared.SIGNALING_ERROR_CODES.RATE_LIMITED,
+  invalidSignalPayload: shared.SIGNALING_ERROR_CODES.INVALID_SIGNAL_PAYLOAD
 } as const;
+
+export function makeSocketErrorPayload(code: SignalingErrorCode): SocketErrorPayload {
+  return shared.createSocketErrorPayload(code);
+}
 
 export {
   CLIENT_EVENT_NAMES,
+  SERVER_EVENT_NAMES,
   GUEST_DISCONNECT_GRACE_MS,
   HOST_DISCONNECT_GRACE_MS,
   JOIN_INVALID_ATTEMPT_COOLDOWN_MAX,
   JOIN_INVALID_ATTEMPT_COOLDOWN_MS,
   JOIN_INVALID_ATTEMPT_NO_COOLDOWN_MAX,
+  MAX_PARTICIPANTS_PER_ROOM,
   ROOM_MAX_DURATION_MS,
   SOLO_HOST_ROOM_TIMEOUT_MS,
-  SERVER_EVENT_NAMES,
+  NICKNAME_CHANGE_COOLDOWN_MS,
   SIGNALING_ERROR_CODES
-};
+} from "@shared";
 
 export type {
   CreateRoomPayload,
@@ -68,10 +66,19 @@ export type {
   PeerJoinedPayload,
   PeerLeftPayload,
   ResumeSessionPayload,
+  SignalingErrorCode,
+  SignalAnswerPayload,
+  SignalAnswerRelayPayload,
+  SignalIcePayload,
+  SignalIceRelayPayload,
+  SignalOfferPayload,
+  SignalOfferRelayPayload,
   RoomCreatedPayload,
   RoomDestroyedPayload,
   RoomJoinedPayload,
   RoomPasswordUpdatePayload,
   RoomPasswordUpdatedPayload,
+  NicknameUpdatePayload,
+  NicknameUpdatedPayload,
   SocketErrorPayload
-};
+} from "@shared";

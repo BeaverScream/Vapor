@@ -7,17 +7,28 @@ import {
   type JoinRoomPayload,
   type PeerJoinedPayload as SharedPeerJoinedPayload,
   type PeerLeftPayload as SharedPeerLeftPayload,
+  type ResumeSessionPayload as SharedResumeSessionPayload,
   type RoomCreatedPayload as SharedRoomCreatedPayload,
   type RoomDestroyedPayload as SharedRoomDestroyedPayload,
   type RoomDestroyedReason as SharedRoomDestroyedReason,
   type RoomJoinedPayload as SharedRoomJoinedPayload,
   type SocketErrorPayload as SharedSocketErrorPayload,
+  type SignalAnswerPayload as SharedSignalAnswerPayload,
+  type SignalAnswerRelayPayload as SharedSignalAnswerRelayPayload,
+  type SignalIcePayload as SharedSignalIcePayload,
+  type SignalIceRelayPayload as SharedSignalIceRelayPayload,
+  type SignalOfferPayload as SharedSignalOfferPayload,
+  type SignalOfferRelayPayload as SharedSignalOfferRelayPayload,
 } from '@shared'
 
 export const CLIENT_EVENTS = {
   CREATE_ROOM: CLIENT_EVENT_NAMES.CREATE_ROOM,
   JOIN_ROOM: CLIENT_EVENT_NAMES.JOIN_ROOM,
   LEAVE_ROOM: CLIENT_EVENT_NAMES.LEAVE_ROOM,
+  SIGNAL_OFFER: CLIENT_EVENT_NAMES.SIGNAL_OFFER,
+  SIGNAL_ANSWER: CLIENT_EVENT_NAMES.SIGNAL_ANSWER,
+  SIGNAL_ICE: CLIENT_EVENT_NAMES.SIGNAL_ICE,
+  RESUME_SESSION: CLIENT_EVENT_NAMES.RESUME_SESSION,
   ROOM_PASSWORD_UPDATE: CLIENT_EVENT_NAMES.ROOM_PASSWORD_UPDATE,
 } as const
 
@@ -26,6 +37,9 @@ export const SERVER_EVENTS = {
   ROOM_JOINED: SERVER_EVENT_NAMES.ROOM_JOINED,
   PEER_JOINED: SERVER_EVENT_NAMES.PEER_JOINED,
   PEER_LEFT: SERVER_EVENT_NAMES.PEER_LEFT,
+  SIGNAL_OFFER: SERVER_EVENT_NAMES.SIGNAL_OFFER,
+  SIGNAL_ANSWER: SERVER_EVENT_NAMES.SIGNAL_ANSWER,
+  SIGNAL_ICE: SERVER_EVENT_NAMES.SIGNAL_ICE,
   HOST_RECONNECT_GRACE: SERVER_EVENT_NAMES.HOST_RECONNECT_GRACE,
   ROOM_PASSWORD_UPDATED: SERVER_EVENT_NAMES.ROOM_PASSWORD_UPDATED,
   ROOM_DESTROYED: SERVER_EVENT_NAMES.ROOM_DESTROYED,
@@ -39,6 +53,7 @@ export type ErrorCode =
   | typeof SIGNALING_ERROR_CODES.INVALID_PASSWORD
   | typeof SIGNALING_ERROR_CODES.RATE_LIMITED
   | 'UNKNOWN'
+  | typeof SIGNALING_ERROR_CODES.INVALID_SIGNAL_PAYLOAD
 
 export type RoomDestroyedReason = SharedRoomDestroyedReason
 
@@ -55,7 +70,39 @@ export interface Participant {
   isHost: boolean
 }
 
+export type ChatConnectionState = 'idle' | 'connecting' | 'connected'
+
+export interface ChatMessage {
+  messageId: string
+  senderParticipantId: string
+  text: string
+  sentAtMs: number
+  direction: 'outgoing' | 'incoming'
+}
+
 export type RoomCreatedPayload = SharedRoomCreatedPayload
+
+export type SignalOfferPayload = SharedSignalOfferPayload
+
+export type SignalAnswerPayload = SharedSignalAnswerPayload
+
+export type SignalIcePayload = SharedSignalIcePayload
+
+export type SignalOfferRelayPayload = SharedSignalOfferRelayPayload
+
+export type SignalAnswerRelayPayload = SharedSignalAnswerRelayPayload
+
+export type SignalIceRelayPayload = SharedSignalIceRelayPayload
+
+export interface SignalOfferRequest extends Required<SignalOfferPayload> {}
+
+export interface SignalAnswerRequest extends Required<SignalAnswerPayload> {}
+
+export interface SignalIceRequest extends Required<SignalIcePayload> {}
+
+export type ResumeSessionPayload = SharedResumeSessionPayload
+
+export interface ResumeSessionRequest extends Required<ResumeSessionPayload> {}
 
 export interface CreateRoomRequest extends Required<CreateRoomPayload> {}
 
@@ -88,8 +135,13 @@ export interface RoomSessionState {
   participantId: string | null
   activeRoomId: string | null
   expiresAt: number | null
+  soloHostDeadlineAt: number | null
   participants: Participant[]
   participantCount: number
+  chatMessages: ChatMessage[]
+  chatDraft: string
+  chatConnectionState: ChatConnectionState
+  connectedPeerCount: number
   hostReconnectGraceDeadlineAt: number | null
   socketState: SocketState
   copyFeedback: string | null
@@ -105,6 +157,8 @@ export interface RoomSessionActions {
   copyRoomId: () => Promise<void>
   leaveRoom: () => void
   backToLobby: () => void
+  setChatDraft: (value: string) => void
+  sendChatMessage: (messageText?: string) => void
 }
 
 export interface RoomSocketClient {
@@ -117,6 +171,9 @@ export interface RoomSocketClient {
   onHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) => void
   onRoomDestroyed: (handler: (payload: RoomDestroyedPayload) => void) => void
   onError: (handler: (payload: SocketErrorPayload) => void) => void
+  onSignalOffer: (handler: (payload: SignalOfferRelayPayload) => void) => void
+  onSignalAnswer: (handler: (payload: SignalAnswerRelayPayload) => void) => void
+  onSignalIce: (handler: (payload: SignalIceRelayPayload) => void) => void
   offConnect: (handler: () => void) => void
   offDisconnect: (handler: () => void) => void
   offRoomCreated: (handler: (payload: RoomCreatedPayload) => void) => void
@@ -126,8 +183,15 @@ export interface RoomSocketClient {
   offHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) => void
   offRoomDestroyed: (handler: (payload: RoomDestroyedPayload) => void) => void
   offError: (handler: (payload: SocketErrorPayload) => void) => void
+  offSignalOffer: (handler: (payload: SignalOfferRelayPayload) => void) => void
+  offSignalAnswer: (handler: (payload: SignalAnswerRelayPayload) => void) => void
+  offSignalIce: (handler: (payload: SignalIceRelayPayload) => void) => void
   emitCreateRoom: (payload: CreateRoomRequest) => void
   emitJoinRoom: (payload: JoinRoomRequest) => void
   emitLeaveRoom: (payload: LeaveRoomRequest) => void
+  emitResumeSession: (payload: ResumeSessionRequest) => void
+  emitSignalOffer: (payload: SignalOfferRequest) => void
+  emitSignalAnswer: (payload: SignalAnswerRequest) => void
+  emitSignalIce: (payload: SignalIceRequest) => void
   disconnect: () => void
 }

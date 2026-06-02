@@ -28,13 +28,15 @@ export function createRoomRecord(
   const hostRecord: ParticipantRecord = {
     participantId,
     socketId,
-    joinedAt: now
+    joinedAt: now,
+    lastSeenAt: now
   };
 
   const room: Phase0RoomRecord = {
     roomId,
     hostId: participantId,
     participants: new Map<string, ParticipantRecord>([[participantId, hostRecord]]),
+    nicknameToParticipant: new Map<string, string>([]),
     createdAt: now
   };
 
@@ -61,7 +63,8 @@ export function joinRoomRecord(
   const participantRecord: ParticipantRecord = {
     participantId,
     socketId,
-    joinedAt: now
+    joinedAt: now,
+    lastSeenAt: now
   };
 
   const peers = Array.from(room.participants.values()).map((peer) => ({
@@ -69,6 +72,7 @@ export function joinRoomRecord(
   }));
 
   room.participants.set(participantId, participantRecord);
+  // nickname mapping is handled by caller
   state.participantToRoom.set(participantId, roomId);
   state.socketToParticipant.set(socketId, participantId);
 
@@ -98,6 +102,16 @@ export function removeParticipantBySocket(
   }
 
   const isHost = room.hostId === participantId;
+  const participantRecord = room.participants.get(participantId);
+  if (participantRecord) {
+    if (participantRecord.nickname && room.nicknameToParticipant) {
+      const key = participantRecord.nickname.toLowerCase();
+      const mapped = room.nicknameToParticipant.get(key);
+      if (mapped === participantId) {
+        room.nicknameToParticipant.delete(key);
+      }
+    }
+  }
 
   room.participants.delete(participantId);
   state.participantToRoom.delete(participantId);

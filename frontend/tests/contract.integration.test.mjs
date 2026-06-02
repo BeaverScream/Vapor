@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
+const registerSocketHandlersFile = path.resolve(process.cwd(), '../backend/src/signaling/registerSocketHandlers.ts')
 const appFile = path.resolve(process.cwd(), 'src/App.tsx')
 const indexCssFile = path.resolve(process.cwd(), 'src/index.css')
 const roomViewFile = path.resolve(process.cwd(), 'src/features/room/RoomView.tsx')
@@ -10,6 +11,7 @@ const typesFile = path.resolve(process.cwd(), 'src/features/room/types.ts')
 const constantsFile = path.resolve(process.cwd(), 'src/features/room/constants.ts')
 const useRoomFile = path.resolve(process.cwd(), 'src/features/room/useVaporRoom.ts')
 const roomSocketClientFile = path.resolve(process.cwd(), 'src/features/room/room-socket-client.ts')
+const webrtcChatMeshFile = path.resolve(process.cwd(), 'src/features/room/webrtc-chat-mesh.ts')
 const errorCopyFile = path.resolve(process.cwd(), 'src/features/room/error-copy.ts')
 const stateUtilsFile = path.resolve(process.cwd(), 'src/features/room/state-utils.ts')
 const lobbyViewFile = path.resolve(process.cwd(), 'src/features/room/LobbyView.tsx')
@@ -24,7 +26,7 @@ function expectContains(content, snippet, label) {
 }
 
 // ---- Contract ----
-test('P0-HR-002: MVP client/server event names remain contract-locked', async () => {
+test('T0.0-01: MVP client/server event names remain contract-locked', async () => {
   const content = await readFile(typesFile, 'utf8')
   const sharedEvents = await readFile(sharedEventsFile, 'utf8')
 
@@ -32,39 +34,136 @@ test('P0-HR-002: MVP client/server event names remain contract-locked', async ()
   expectContains(content, 'CREATE_ROOM: CLIENT_EVENT_NAMES.CREATE_ROOM', 'client create_room event source')
   expectContains(content, 'JOIN_ROOM: CLIENT_EVENT_NAMES.JOIN_ROOM', 'client join_room event source')
   expectContains(content, 'LEAVE_ROOM: CLIENT_EVENT_NAMES.LEAVE_ROOM', 'client leave_room event source')
+  expectContains(content, 'SIGNAL_OFFER: CLIENT_EVENT_NAMES.SIGNAL_OFFER', 'client signal_offer event source')
+  expectContains(content, 'SIGNAL_ANSWER: CLIENT_EVENT_NAMES.SIGNAL_ANSWER', 'client signal_answer event source')
+  expectContains(content, 'SIGNAL_ICE: CLIENT_EVENT_NAMES.SIGNAL_ICE', 'client signal_ice event source')
+  expectContains(content, 'RESUME_SESSION: CLIENT_EVENT_NAMES.RESUME_SESSION', 'client resume_session event source')
 
   expectContains(content, 'ROOM_CREATED: SERVER_EVENT_NAMES.ROOM_CREATED', 'server room_created event source')
   expectContains(content, 'ROOM_JOINED: SERVER_EVENT_NAMES.ROOM_JOINED', 'server room_joined event source')
   expectContains(content, 'PEER_JOINED: SERVER_EVENT_NAMES.PEER_JOINED', 'server peer_joined event source')
   expectContains(content, 'PEER_LEFT: SERVER_EVENT_NAMES.PEER_LEFT', 'server peer_left event source')
+  expectContains(content, 'SIGNAL_OFFER: SERVER_EVENT_NAMES.SIGNAL_OFFER', 'server signal_offer event source')
+  expectContains(content, 'SIGNAL_ANSWER: SERVER_EVENT_NAMES.SIGNAL_ANSWER', 'server signal_answer event source')
+  expectContains(content, 'SIGNAL_ICE: SERVER_EVENT_NAMES.SIGNAL_ICE', 'server signal_ice event source')
   expectContains(content, 'ROOM_DESTROYED: SERVER_EVENT_NAMES.ROOM_DESTROYED', 'server room_destroyed event source')
   expectContains(content, 'ERROR: SERVER_EVENT_NAMES.ERROR', 'server error event source')
 
   expectContains(sharedEvents, 'CREATE_ROOM: "create_room"', 'shared create_room literal')
   expectContains(sharedEvents, 'ROOM_CREATED: "room_created"', 'shared room_created literal')
+  expectContains(sharedEvents, 'SIGNAL_OFFER: "signal_offer"', 'shared signal_offer literal')
+  expectContains(sharedEvents, 'SIGNAL_ANSWER: "signal_answer"', 'shared signal_answer literal')
+  expectContains(sharedEvents, 'SIGNAL_ICE: "signal_ice"', 'shared signal_ice literal')
 })
 
-test('P0-HR-002: required payload keys for room transitions remain present in FE contract types', async () => {
+test('T0.0-02: required payload keys for room transitions remain present in FE contract types', async () => {
   const content = await readFile(typesFile, 'utf8')
   const sharedPayloads = await readFile(sharedPayloadsFile, 'utf8')
 
   expectContains(content, 'export type RoomCreatedPayload = SharedRoomCreatedPayload', 'RoomCreatedPayload shared alias')
   expectContains(content, 'export type RoomJoinedPayload = SharedRoomJoinedPayload', 'RoomJoinedPayload shared alias')
   expectContains(content, 'export type PeerJoinedPayload = SharedPeerJoinedPayload', 'PeerJoinedPayload shared alias')
+  expectContains(content, 'export type SignalOfferPayload = SharedSignalOfferPayload', 'SignalOfferPayload shared alias')
+  expectContains(content, 'export type SignalAnswerPayload = SharedSignalAnswerPayload', 'SignalAnswerPayload shared alias')
+  expectContains(content, 'export type SignalIcePayload = SharedSignalIcePayload', 'SignalIcePayload shared alias')
 
   expectContains(sharedPayloads, 'export type RoomCreatedPayload = {', 'shared RoomCreatedPayload type')
   expectContains(sharedPayloads, 'hostId: string', 'shared hostId field on room lifecycle payloads')
   expectContains(sharedPayloads, 'expiresAt: number', 'shared expiresAt number field')
+  expectContains(sharedPayloads, 'soloHostDeadlineAt?: number | null;', 'shared optional solo host deadline field')
   expectContains(sharedPayloads, 'participantCount: number', 'shared participantCount field')
+  expectContains(sharedPayloads, 'export type SignalOfferRelayPayload = {', 'shared SignalOfferRelayPayload type')
+  expectContains(sharedPayloads, 'export type SignalAnswerRelayPayload = {', 'shared SignalAnswerRelayPayload type')
+  expectContains(sharedPayloads, 'export type SignalIceRelayPayload = {', 'shared SignalIceRelayPayload type')
 })
 
-test('VP-0.1-05 / P0-JN-003: FE join emit preserves exact roomId input text', async () => {
+test('T2.6-03: frontend WebRTC signaling and RAM-only chat state wiring remain locked', async () => {
+  const types = await readFile(typesFile, 'utf8')
+  const socketClient = await readFile(roomSocketClientFile, 'utf8')
+  const useRoom = await readFile(useRoomFile, 'utf8')
+  const stateUtils = await readFile(stateUtilsFile, 'utf8')
+  const roomView = await readFile(roomViewFile, 'utf8')
+  const mesh = await readFile(webrtcChatMeshFile, 'utf8')
+
+  expectContains(types, 'onSignalOffer: (handler: (payload: SignalOfferRelayPayload) => void) => void', 'signal_offer socket listener contract')
+  expectContains(types, 'emitSignalOffer: (payload: SignalOfferRequest) => void', 'signal_offer client emit contract')
+  expectContains(types, 'emitResumeSession: (payload: ResumeSessionRequest) => void', 'resume_session client emit contract')
+  expectContains(types, 'chatMessages: ChatMessage[]', 'RAM-only chat message state field')
+  expectContains(types, 'chatDraft: string', 'chat draft state field')
+
+  expectContains(socketClient, 'socket.on(SERVER_EVENTS.SIGNAL_OFFER, handler)', 'signal_offer listener wiring')
+  expectContains(socketClient, 'socket.emit(CLIENT_EVENTS.SIGNAL_OFFER, payload)', 'signal_offer emit wiring')
+  expectContains(socketClient, 'socket.emit(CLIENT_EVENTS.SIGNAL_ANSWER, payload)', 'signal_answer emit wiring')
+  expectContains(socketClient, 'socket.emit(CLIENT_EVENTS.SIGNAL_ICE, payload)', 'signal_ice emit wiring')
+  expectContains(socketClient, 'socket.emit(CLIENT_EVENTS.RESUME_SESSION, payload)', 'resume_session emit wiring')
+
+  expectContains(useRoom, 'new VaporWebRtcChatMesh', 'WebRTC mesh construction')
+  expectContains(useRoom, 'peerMesh.syncPeers(payload.peers.map((peer) => peer.participantId))', 'peer sync on room_joined')
+  expectContains(useRoom, 'emitSafeWebRtcTelemetry', 'safe telemetry helper wiring')
+  expectContains(useRoom, 'socket.onSignalOffer(onSignalOffer)', 'signal_offer hook subscription')
+  expectContains(useRoom, 'sendChatMessage', 'chat send action wiring')
+  expectContains(useRoom, 'sessionStorage', 'session storage usage for reconnect token policy')
+
+  expectContains(stateUtils, 'chatMessages: []', 'chat state reset to volatile memory')
+  expectContains(stateUtils, "chatDraft: ''", 'chat draft reset to volatile memory')
+
+  expectContains(roomView, 'aria-label="Peer chat"', 'chat landmark for accessibility')
+  expectContains(roomView, 'onSendChatMessage()', 'chat submit trigger')
+  expectContains(mesh, 'iceServers: WEBRTC_ICE_SERVERS', 'configurable ICE server policy')
+  expectContains(mesh, 'kind: \'peer_connection_state\'', 'safe peer connection state telemetry')
+  expectContains(mesh, 'kind: \'data_channel_state\'', 'safe data channel state telemetry')
+})
+
+test('T2.5-01: frontend solo-host timer state and countdown UX are contract-locked', async () => {
+  const constants = await readFile(constantsFile, 'utf8')
+  const types = await readFile(typesFile, 'utf8')
+  const stateUtils = await readFile(stateUtilsFile, 'utf8')
+  const useRoom = await readFile(useRoomFile, 'utf8')
+  const roomView = await readFile(roomViewFile, 'utf8')
+
+  expectContains(types, 'soloHostDeadlineAt: number | null', 'room session solo host deadline state field')
+  expectContains(stateUtils, 'soloHostDeadlineAt: payload.soloHostDeadlineAt ?? null', 'room-created reducer solo deadline sync')
+  expectContains(stateUtils, 'soloHostDeadlineAt: null', 'solo deadline cleared on lifecycle transitions')
+  expectContains(useRoom, 'function getSoloWaitingText', 'solo waiting formatter helper')
+  expectContains(useRoom, 'SOLO_HOST_WARNING', 'solo warning copy usage')
+  expectContains(roomView, 'soloWaitingChipText', 'solo warning chip prop wiring')
+  expectContains(constants, 'SOLO_HOST_WARNING', 'solo warning copy constant')
+})
+
+test('T2.2-01: frontend resume-session flow includes race guard and deterministic token cleanup', async () => {
+  const types = await readFile(typesFile, 'utf8')
+  const useRoom = await readFile(useRoomFile, 'utf8')
+  const constants = await readFile(constantsFile, 'utf8')
+
+  expectContains(types, 'ResumeSessionRequest', 'resume request contract type')
+  expectContains(useRoom, 'resumeInFlightRef', 'resume race guard ref')
+  expectContains(useRoom, 'autoResumeRequestedRef', 'auto resume state guard ref')
+  expectContains(useRoom, 'socket.emitResumeSession(storedSession)', 'resume_session emit path')
+  expectContains(useRoom, 'clearStoredReconnectSession()', 'token cleanup path')
+  expectContains(constants, 'RECONNECT_SESSION_STORAGE_KEY', 'sessionStorage key constant')
+})
+
+test('T2.7-01: frontend ICE config and telemetry safety wiring remain locked', async () => {
+  const constants = await readFile(constantsFile, 'utf8')
+  const useRoom = await readFile(useRoomFile, 'utf8')
+  const mesh = await readFile(webrtcChatMeshFile, 'utf8')
+
+  expectContains(constants, 'VITE_STUN_URLS', 'stun env config input')
+  expectContains(constants, 'VITE_TURN_URLS', 'turn urls env config input')
+  expectContains(constants, 'VITE_TURN_USERNAME', 'turn username env config input')
+  expectContains(constants, 'VITE_TURN_CREDENTIAL', 'turn credential env config input')
+  expectContains(constants, 'WEBRTC_ICE_SERVERS = buildIceServers()', 'runtime ICE server policy export')
+  expectContains(useRoom, "new CustomEvent('vapor:webrtc-state'", 'safe telemetry event emission')
+  expectContains(mesh, 'onTelemetryEvent', 'mesh telemetry callback contract')
+})
+
+test('T0.1-07: FE join emit preserves exact roomId input text', async () => {
   const content = await readFile(useRoomFile, 'utf8')
   expectContains(content, 'socket.emitJoinRoom({ roomId: state.roomIdInput, password: state.passwordInput })', 'exact roomId join emission')
 })
 
 // ---- UI Shell ----
-test('VP-1.3-AC1/AC2: lobby shell includes Privacy/FAQ links and one approved sr-only h1 in main', async () => {
+test('T1.3-01: lobby shell includes Privacy/FAQ links and one approved sr-only h1 in main', async () => {
   const app = await readFile(appFile, 'utf8')
 
   expectContains(app, '<main', 'main landmark')
@@ -76,7 +175,7 @@ test('VP-1.3-AC1/AC2: lobby shell includes Privacy/FAQ links and one approved sr
   assert.equal(h1Count, 1, `Expected one h1 in App shell, found ${h1Count}`)
 })
 
-test('VP-1.3-AC3: global sr-only utility class is present', async () => {
+test('T1.3-02: global sr-only utility class is present', async () => {
   const css = await readFile(indexCssFile, 'utf8')
 
   expectContains(css, '.sr-only', 'sr-only utility selector')
@@ -84,7 +183,7 @@ test('VP-1.3-AC3: global sr-only utility class is present', async () => {
 })
 
 // ---- Auth ----
-test('VP-1.4: auth mismatch normalization and required-password submit hook remain locked', async () => {
+test('T1.4-02: auth mismatch normalization and required-password submit hook remain locked', async () => {
   const errorCopy = await readFile(errorCopyFile, 'utf8')
   const useRoom = await readFile(useRoomFile, 'utf8')
   const lobbyView = await readFile(lobbyViewFile, 'utf8')
@@ -98,20 +197,21 @@ test('VP-1.4: auth mismatch normalization and required-password submit hook rema
   expectContains(sharedErrors, 'PASSWORD_VERSION_MISMATCH: "PASSWORD_VERSION_MISMATCH"', 'shared PASSWORD_VERSION_MISMATCH constant')
 })
 
-test('VP-2.4: frontend error layer handles RATE_LIMITED code and surfaces join-attempt policy language', async () => {
+test('T2.4-03: frontend error layer handles RATE_LIMITED code and surfaces join-attempt policy language', async () => {
   const errorCopy = await readFile(errorCopyFile, 'utf8')
   const useRoom = await readFile(useRoomFile, 'utf8')
   const constants = await readFile(constantsFile, 'utf8')
   const sharedPolicy = await readFile(sharedPolicyFile, 'utf8')
 
   expectContains(errorCopy, 'case SIGNALING_ERROR_CODES.RATE_LIMITED:', 'RATE_LIMITED error code mapping in error-copy')
+  expectContains(errorCopy, 'case SIGNALING_ERROR_CODES.ROOM_FULL:', 'ROOM_FULL error code mapping in error-copy')
   expectContains(useRoom, 'SIGNALING_ERROR_CODES.RATE_LIMITED', 'RATE_LIMITED reference in useRoom join path')
   expectContains(constants, 'JOIN_RATE_LIMIT_COOLDOWN_MS = JOIN_INVALID_ATTEMPT_COOLDOWN_MS', 'frontend cooldown sourced from shared policy')
   expectContains(sharedPolicy, 'JOIN_INVALID_ATTEMPT_COOLDOWN_MS = 10 * 60 * 1000', 'shared cooldown policy constant')
 })
 
 // ---- Host Identity ----
-test('VP-1.5-AC1/AC2: room participant model and UI expose explicit host labeling', async () => {
+test('T1.5-01: room participant model and UI expose explicit host labeling', async () => {
   const types = await readFile(typesFile, 'utf8')
   const roomView = await readFile(roomViewFile, 'utf8')
   const stateUtils = await readFile(stateUtilsFile, 'utf8')
@@ -122,7 +222,7 @@ test('VP-1.5-AC1/AC2: room participant model and UI expose explicit host labelin
   expectContains(stateUtils, 'participant.participantId === payload.hostId', 'host role mapped from explicit hostId payload')
 })
 
-test('VP-1.7: room lifetime text keeps >=10m compact and <10m strict zero-padded mm:ss', async () => {
+test('T1.7-01: room lifetime text keeps >=10m compact and <10m strict zero-padded mm:ss', async () => {
   const useRoom = await readFile(useRoomFile, 'utf8')
 
   expectContains(useRoom, 'if (minutes >= 10)', '>=10 minutes compact branch')
@@ -133,7 +233,7 @@ test('VP-1.7: room lifetime text keeps >=10m compact and <10m strict zero-padded
 })
 
 // ---- Lifecycle ----
-test('VP-1.6 / VP-1.7: canonical room_destroyed reasons and solo-timeout messaging hooks remain locked', async () => {
+test('T1.6-02: canonical room_destroyed reasons and solo-timeout messaging hooks remain locked', async () => {
   const types = await readFile(typesFile, 'utf8')
   const stateUtils = await readFile(stateUtilsFile, 'utf8')
   const useRoom = await readFile(useRoomFile, 'utf8')
@@ -153,4 +253,28 @@ test('VP-1.6 / VP-1.7: canonical room_destroyed reasons and solo-timeout messagi
   expectContains(useRoom, 'withRoomEnded(previous, payload.reason)', 'payload-driven room destroy handling')
   expectContains(roomSocketClient, 'SERVER_EVENTS.HOST_RECONNECT_GRACE', 'host reconnect grace socket contract wiring')
   expectContains(useRoom, 'withHostReconnectGrace(previous, payload.deadlineAt)', 'host reconnect grace state handling')
+})
+
+// ---- VP-3.1 Security & Housekeeping ----
+test('T3.1-05 (P3-SH-005): per-room lock serializes password updates and resume-session validation', async () => {
+  const handlers = await readFile(registerSocketHandlersFile, 'utf8')
+
+  // The per-room lock helper must be defined and used in the signaling module
+  expectContains(handlers, 'function withRoomLock(', 'withRoomLock helper definition')
+
+  // Both mutating operations — password update and session resume — must route through the lock
+  // to prevent overlapping mutations from producing inconsistent reconnect state.
+  expectContains(handlers, "await withRoomLock(roomId", 'at least one withRoomLock usage (room_password_update or resume_session)')
+
+  const lockUsages = (handlers.match(/await withRoomLock\(roomId/g) ?? []).length
+  assert.ok(
+    lockUsages >= 2,
+    `Both room_password_update and resume_session must use withRoomLock — found ${lockUsages} usage(s)`
+  )
+
+  // resume_session handler must be declared async so the lock await is valid
+  expectContains(handlers, 'async (payload: ResumeSessionPayload', 'resume_session handler declared async')
+
+  // room_password_update handler must be declared async so the lock await is valid
+  expectContains(handlers, 'async (payload: RoomPasswordUpdatePayload', 'room_password_update handler declared async')
 })

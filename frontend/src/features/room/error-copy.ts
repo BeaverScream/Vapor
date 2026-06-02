@@ -15,6 +15,7 @@ export function mapErrorCode(rawCode?: string): ErrorCode {
     case SIGNALING_ERROR_CODES.ROOM_FULL:
     case SIGNALING_ERROR_CODES.ROOM_EXPIRED:
     case SIGNALING_ERROR_CODES.INVALID_PASSWORD:
+    case SIGNALING_ERROR_CODES.INVALID_SIGNAL_PAYLOAD:
     case SIGNALING_ERROR_CODES.RATE_LIMITED:
       return rawCode
     case SIGNALING_ERROR_CODES.PASSWORD_VERSION_MISMATCH:
@@ -34,6 +35,8 @@ export function getErrorMessage(code: ErrorCode): string {
       return 'Room expired.'
     case SIGNALING_ERROR_CODES.INVALID_PASSWORD:
       return 'Password is required or incorrect.'
+    case SIGNALING_ERROR_CODES.INVALID_SIGNAL_PAYLOAD:
+      return 'Could not establish peer signaling. Try reconnecting.'
     case SIGNALING_ERROR_CODES.RATE_LIMITED:
       return 'Too many attempts. Try again later.'
     default:

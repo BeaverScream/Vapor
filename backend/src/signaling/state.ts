@@ -2,12 +2,16 @@ export type ParticipantRecord = {
   participantId: string;
   socketId: string;
   joinedAt: number;
+  lastSeenAt: number;
+  nickname?: string;
+  nicknameUpdatedAt?: number;
 };
 
 export type Phase0RoomRecord = {
   roomId: string;
   hostId: string;
   participants: Map<string, ParticipantRecord>;
+  nicknameToParticipant: Map<string, string>;
   createdAt: number;
 };
 

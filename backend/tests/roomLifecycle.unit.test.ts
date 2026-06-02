@@ -1,3 +1,5 @@
+/// <reference types="node" />
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -26,7 +28,7 @@ function createFactories(roomIds: string[]): RoomIdentityFactories {
   };
 }
 
-test("P0-RM-005: createRoomRecord enforces unique room id when factory collides", () => {
+test("T0.1-01: createRoomRecord enforces unique room id when factory collides", () => {
   const state = createPhase0State();
   const factories = createFactories(["ABCD12", "ABCD12", "ZXCV98"]);
 
@@ -38,7 +40,7 @@ test("P0-RM-005: createRoomRecord enforces unique room id when factory collides"
   assert.equal(state.rooms.size, 2);
 });
 
-test("P0-JN-002 edge: joinRoomRecord returns null when room does not exist", () => {
+test("T0.1-02: joinRoomRecord returns null when room does not exist", () => {
   const state = createPhase0State();
 
   const joined = joinRoomRecord(state, "MISSING", "socket-a", 123, () => "P-1");
@@ -49,7 +51,7 @@ test("P0-JN-002 edge: joinRoomRecord returns null when room does not exist", () 
   assert.equal(state.socketToParticipant.size, 0);
 });
 
-test("P0-DC-006 edge: removeParticipantBySocket returns null for unknown socket", () => {
+test("T0.2-01: removeParticipantBySocket returns null for unknown socket", () => {
   const state = createPhase0State();
 
   const removed = removeParticipantBySocket(state, "unknown-socket");
@@ -57,7 +59,7 @@ test("P0-DC-006 edge: removeParticipantBySocket returns null for unknown socket"
   assert.equal(removed, null);
 });
 
-test("P0-LV-008 edge: host removal atomically purges participant/socket indexes", () => {
+test("T0.2-02: host removal atomically purges participant/socket indexes", () => {
   const state = createPhase0State();
   const factories = createFactories(["ROOM01"]);
 
@@ -69,7 +71,10 @@ test("P0-LV-008 edge: host removal atomically purges participant/socket indexes"
 
   const removed = removeParticipantBySocket(state, "socket-host");
 
-  assert.ok(removed);
+  if (!removed) {
+    throw new Error("Expected host removal result");
+  }
+
   assert.equal(removed.isHost, true);
   assert.equal(removed.roomStillActive, false);
   assert.equal(state.rooms.size, 0);
@@ -77,14 +82,17 @@ test("P0-LV-008 edge: host removal atomically purges participant/socket indexes"
   assert.equal(state.socketToParticipant.size, 0);
 });
 
-test("P0-LV-005 edge: removing last guest destroys now-empty room", () => {
+test("T0.2-03: removing last guest destroys now-empty room", () => {
   const state = createPhase0State();
   const factories = createFactories(["ROOM02"]);
 
   const host = createRoomRecord(state, "socket-host", 10, factories);
   const removedHost = removeParticipantBySocket(state, "socket-host");
 
-  assert.ok(removedHost);
+  if (!removedHost) {
+    throw new Error("Expected host removal result");
+  }
+
   assert.equal(removedHost.roomStillActive, false);
   assert.equal(state.rooms.size, 0);
   assert.equal(state.participantToRoom.size, 0);

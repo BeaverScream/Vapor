@@ -1,13 +1,15 @@
 import type { RoomDestroyedReason } from "./reasons";
-import type { SignalingErrorCode } from "./error-codes";
+import { SIGNALING_ERROR_CODES, type SignalingErrorCode } from "./error-codes";
 
 export type CreateRoomPayload = {
   password?: string;
+  nickname: string;
 };
 
 export type JoinRoomPayload = {
   roomId?: string;
   password?: string;
+  nickname: string;
 };
 
 export type ResumeSessionPayload = {
@@ -20,17 +22,56 @@ export type RoomPasswordUpdatePayload = {
   newPassword?: string;
 };
 
+export type SignalOfferPayload = {
+  roomId?: string;
+  toParticipantId?: string;
+  sdp?: string;
+};
+
+export type SignalAnswerPayload = {
+  roomId?: string;
+  toParticipantId?: string;
+  sdp?: string;
+};
+
+export type SignalIcePayload = {
+  roomId?: string;
+  toParticipantId?: string;
+  candidate?: string | Record<string, unknown>;
+};
+
 export type SocketErrorPayload = {
-  code: SignalingErrorCode | string;
+  code: SignalingErrorCode;
   message: string;
 };
+
+export const SIGNALING_ERROR_MESSAGES: Record<SignalingErrorCode, string> = {
+  [SIGNALING_ERROR_CODES.ROOM_NOT_FOUND]: "Room not found",
+  [SIGNALING_ERROR_CODES.ROOM_FULL]: "Room is full",
+  [SIGNALING_ERROR_CODES.ROOM_EXPIRED]: "Room expired",
+  [SIGNALING_ERROR_CODES.INVALID_PASSWORD]: "Invalid password",
+  [SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED]: "Host reconnect window expired",
+  [SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE]: "Reconnect token stale",
+  [SIGNALING_ERROR_CODES.PASSWORD_VERSION_MISMATCH]: "Password version mismatch",
+  [SIGNALING_ERROR_CODES.RATE_LIMITED]: "Rate limited",
+  [SIGNALING_ERROR_CODES.INVALID_SIGNAL_PAYLOAD]: "Invalid signaling payload"
+};
+
+export function createSocketErrorPayload(code: SignalingErrorCode): SocketErrorPayload {
+  return {
+    code,
+    message: SIGNALING_ERROR_MESSAGES[code]
+  };
+}
 
 export type RoomCreatedPayload = {
   roomId: string;
   participantId: string;
   hostId: string;
   reconnectToken: string | null;
+  participantNickname?: string | null;
   expiresAt: number;
+  soloHostDeadlineAt?: number | null;
   participantCount: number;
 };
 
@@ -41,7 +82,18 @@ export type RoomJoinedPayload = {
   peers: Array<{ participantId: string }>;
   reconnectToken: string | null;
   expiresAt: number;
+  participantNickname?: string | null;
   participantCount: number;
+};
+
+export type NicknameUpdatePayload = {
+  roomId?: string;
+  nickname?: string;
+};
+
+export type NicknameUpdatedPayload = {
+  participantId: string;
+  nickname: string;
 };
 
 export type PeerJoinedPayload = {
@@ -66,4 +118,22 @@ export type RoomPasswordUpdatedPayload = {
 
 export type RoomDestroyedPayload = {
   reason: RoomDestroyedReason;
+};
+
+export type SignalOfferRelayPayload = {
+  roomId: string;
+  fromParticipantId: string;
+  sdp: string;
+};
+
+export type SignalAnswerRelayPayload = {
+  roomId: string;
+  fromParticipantId: string;
+  sdp: string;
+};
+
+export type SignalIceRelayPayload = {
+  roomId: string;
+  fromParticipantId: string;
+  candidate: string | Record<string, unknown>;
 };

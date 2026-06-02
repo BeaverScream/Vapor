@@ -1,4 +1,4 @@
-import faqContent from '../../assets/content/faq.md?raw'
+import faqContent from './faq.md?raw'
 import { MarkdownPage } from './MarkdownPage'
 
 interface FAQPageProps {
@@ -15,4 +15,4 @@ export function FAQPage({ onBack }: FAQPageProps) {
   )
 }
 
-// To update FAQ content, edit: frontend/src/assets/content/faq.md
+// To update FAQ content, edit: frontend/src/features/info/faq.md

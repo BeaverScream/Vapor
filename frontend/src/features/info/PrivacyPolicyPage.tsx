@@ -1,7 +1,7 @@
-import privacyContent from '../../assets/content/privacy-policy.md?raw'
+import privacyContent from './privacy-policy.md?raw'
 import { MarkdownPage } from './MarkdownPage'
 
-// To update Privacy Policy content, edit: frontend/src/assets/content/privacy-policy.md
+// To update Privacy Policy content, edit: frontend/src/features/info/privacy-policy.md
 
 interface PrivacyPolicyPageProps {
   onBack: () => void

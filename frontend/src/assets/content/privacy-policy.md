@@ -36,4 +36,4 @@ Vapor is provided as-is. If a room closes or the service restarts, old room cont
 
 ## More detail
 
-For the full technical policy and lifecycle rules, see [docs/Vapor System Design.md](../../../docs/Vapor%20System%20Design.md).
+For the full technical policy and lifecycle rules, see [docs/Vapor_documents/Vapor System Design.md](../../../../docs/Vapor_documents/Vapor%20System%20Design.md).

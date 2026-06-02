@@ -54,6 +54,7 @@ function App() {
   return (
     <main className="relative flex min-h-dvh items-center justify-center overflow-hidden px-4 py-6">
       <h1 className="sr-only">Vapor: Secure Temporary Rooms for Real-Time Collaboration</h1>
+      <p className="sr-only">Connection secure visual atmosphere active.</p>
       <div className="vapor-smoke-layer" aria-hidden="true" />
       <NavBar onPrivacy={() => navigate('/privacy-policy', 'privacy')} onFaq={() => navigate('/faq', 'faq')} />
 
@@ -81,9 +82,14 @@ function App() {
           participantCount={state.participantCount}
           participants={state.participants}
           roomStatus={derived.roomStatus}
+          chatStatusText={derived.chatStatusText}
+          soloWaitingChipText={derived.soloWaitingChipText}
           roomLifetimeText={derived.roomLifetimeText}
           copyFeedback={state.copyFeedback}
+          chatMessages={state.chatMessages}
+          chatDraft={state.chatDraft}
           onCopyRoomId={actions.copyRoomId}
+          onSendChatMessage={actions.sendChatMessage}
           onLeaveRoom={actions.leaveRoom}
         />
       ) : null}

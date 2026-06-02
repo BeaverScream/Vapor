@@ -59,7 +59,7 @@ async function collectTypeScriptFiles(dirPath: string): Promise<string[]> {
   return files.flat();
 }
 
-test("P1-ZP-012: backend source contains no obvious secret-logging statements", async () => {
+test("T1.ZP-01: backend source contains no obvious secret-logging statements", async () => {
   const files = await collectTypeScriptFiles(BACKEND_SRC_ROOT);
   assert.ok(files.length > 0, "Expected backend TypeScript source files");
 
@@ -77,7 +77,7 @@ test("P1-ZP-012: backend source contains no obvious secret-logging statements", 
 });
 
 // ---- Zero-Persistence ----
-test("P0-RS-004: backend source avoids persistence APIs/libraries in Phase 0 runtime paths", async () => {
+test("T0.ZP-01: backend source avoids persistence APIs/libraries in Phase 0 runtime paths", async () => {
   const files = await collectTypeScriptFiles(BACKEND_SRC_ROOT);
 
   for (const filePath of files) {
@@ -98,7 +98,7 @@ test("P0-RS-004: backend source avoids persistence APIs/libraries in Phase 0 run
 });
 
 // ---- Contract + Auth ----
-test("P1-EV-008 / VP-1.1-AC1: backend signaling event contract names are canonical", async () => {
+test("T1.1-01: backend signaling event contract names are canonical", async () => {
   const contracts = await fs.readFile(SIGNALING_CONTRACTS_FILE, "utf8");
   const sharedEvents = await fs.readFile(SHARED_EVENTS_FILE, "utf8");
   const sharedPayloads = await fs.readFile(SHARED_PAYLOADS_FILE, "utf8");
@@ -107,10 +107,16 @@ test("P1-EV-008 / VP-1.1-AC1: backend signaling event contract names are canonic
   expectContains(contracts, "CLIENT_EVENT_NAMES.CREATE_ROOM", "create_room sourced from shared");
   expectContains(contracts, "CLIENT_EVENT_NAMES.JOIN_ROOM", "join_room sourced from shared");
   expectContains(contracts, "CLIENT_EVENT_NAMES.LEAVE_ROOM", "leave_room sourced from shared");
+  expectContains(contracts, "CLIENT_EVENT_NAMES.SIGNAL_OFFER", "signal_offer sourced from shared");
+  expectContains(contracts, "CLIENT_EVENT_NAMES.SIGNAL_ANSWER", "signal_answer sourced from shared");
+  expectContains(contracts, "CLIENT_EVENT_NAMES.SIGNAL_ICE", "signal_ice sourced from shared");
   expectContains(contracts, "SERVER_EVENT_NAMES.ROOM_CREATED", "room_created sourced from shared");
   expectContains(contracts, "SERVER_EVENT_NAMES.ROOM_JOINED", "room_joined sourced from shared");
   expectContains(contracts, "SERVER_EVENT_NAMES.PEER_JOINED", "peer_joined sourced from shared");
   expectContains(contracts, "SERVER_EVENT_NAMES.PEER_LEFT", "peer_left sourced from shared");
+  expectContains(contracts, "SERVER_EVENT_NAMES.SIGNAL_OFFER", "signal_offer relay sourced from shared");
+  expectContains(contracts, "SERVER_EVENT_NAMES.SIGNAL_ANSWER", "signal_answer relay sourced from shared");
+  expectContains(contracts, "SERVER_EVENT_NAMES.SIGNAL_ICE", "signal_ice relay sourced from shared");
   expectContains(contracts, "SERVER_EVENT_NAMES.ROOM_DESTROYED", "room_destroyed sourced from shared");
   expectContains(contracts, "SERVER_EVENT_NAMES.ERROR", "error sourced from shared");
 
@@ -118,6 +124,9 @@ test("P1-EV-008 / VP-1.1-AC1: backend signaling event contract names are canonic
   expectContains(sharedEvents, 'CREATE_ROOM: "create_room"', "shared create_room literal");
   expectContains(sharedEvents, 'JOIN_ROOM: "join_room"', "shared join_room literal");
   expectContains(sharedEvents, 'LEAVE_ROOM: "leave_room"', "shared leave_room literal");
+  expectContains(sharedEvents, 'SIGNAL_OFFER: "signal_offer"', "shared signal_offer literal");
+  expectContains(sharedEvents, 'SIGNAL_ANSWER: "signal_answer"', "shared signal_answer literal");
+  expectContains(sharedEvents, 'SIGNAL_ICE: "signal_ice"', "shared signal_ice literal");
   expectContains(sharedEvents, 'ROOM_CREATED: "room_created"', "shared room_created literal");
   expectContains(sharedEvents, 'PEER_JOINED: "peer_joined"', "shared peer_joined literal");
   expectContains(sharedEvents, 'PEER_LEFT: "peer_left"', "shared peer_left literal");
@@ -125,10 +134,25 @@ test("P1-EV-008 / VP-1.1-AC1: backend signaling event contract names are canonic
   expectContains(sharedEvents, 'ERROR: "error"', "shared error literal");
   expectContains(sharedPayloads, "export type RoomCreatedPayload = {", "shared room_created payload contract");
   expectContains(sharedPayloads, "export type RoomJoinedPayload = {", "shared room_joined payload contract");
+  expectContains(sharedPayloads, "export type SignalOfferPayload = {", "shared signal_offer payload contract");
+  expectContains(sharedPayloads, "export type SignalAnswerPayload = {", "shared signal_answer payload contract");
+  expectContains(sharedPayloads, "export type SignalIcePayload = {", "shared signal_ice payload contract");
   expectContains(sharedPayloads, "hostId: string", "shared explicit hostId contract field");
 });
 
-test("P1-EV-009 / VP-1.1-AC2: backend does not expose legacy destroy reason alias", async () => {
+test("T2.1-01: socket errors are emitted through the shared deterministic envelope helper", async () => {
+  const contracts = await fs.readFile(SIGNALING_CONTRACTS_FILE, "utf8");
+  const handlers = await fs.readFile(SOCKET_HANDLERS_FILE, "utf8");
+  const sharedPayloads = await fs.readFile(SHARED_PAYLOADS_FILE, "utf8");
+
+  expectContains(sharedPayloads, "export const SIGNALING_ERROR_MESSAGES", "shared deterministic error message map");
+  expectContains(sharedPayloads, "export function createSocketErrorPayload", "shared socket error payload helper");
+  expectContains(contracts, "makeSocketErrorPayload", "backend contract helper for shared error envelope");
+  expectContains(handlers, "emitSocketError(socket, ERROR_CODES", "handler-level deterministic envelope usage");
+  expectContains(handlers, "emitInvalidSignalPayload(socket)", "signal payload validation failure envelope usage");
+});
+
+test("T1.1-02: backend does not expose legacy destroy reason alias", async () => {
   const sharedReasons = await fs.readFile(SHARED_REASONS_FILE, "utf8");
 
   expectContains(sharedReasons, '"host_left"', "canonical host_left reason");
@@ -138,7 +162,7 @@ test("P1-EV-009 / VP-1.1-AC2: backend does not expose legacy destroy reason alia
   expectNotContains(sharedReasons, '"host_disconnected"', "legacy host_disconnected reason");
 });
 
-test("P1-AU-013 / VP-1.4-AC1/AC2/AC3: create/join/update enforce trim + INVALID_PASSWORD semantics", async () => {
+test("T1.4-01: create/join/update enforce trim + INVALID_PASSWORD semantics", async () => {
   const handlers = await fs.readFile(SOCKET_HANDLERS_FILE, "utf8");
 
   expectContains(handlers, "ERROR_CODES.invalidPassword", "contract-based invalid password error code usage");
@@ -150,7 +174,7 @@ test("P1-AU-013 / VP-1.4-AC1/AC2/AC3: create/join/update enforce trim + INVALID_
 });
 
 // ---- Lifecycle ----
-test("P1-LV-014 / VP-1.6-AC2/AC4 and VP-1.7-AC3: lifecycle uses grace + precedence primitives", async () => {
+test("T1.6-01: lifecycle uses grace + precedence primitives", async () => {
   const handlers = await fs.readFile(SOCKET_HANDLERS_FILE, "utf8");
 
   expectContains(handlers, "SERVER_EVENTS.hostReconnectGrace", "host grace notification event via contract constant");
@@ -161,16 +185,25 @@ test("P1-LV-014 / VP-1.6-AC2/AC4 and VP-1.7-AC3: lifecycle uses grace + preceden
 });
 
 // ---- Rate Limiting ----
-test("P2-RL-015 / VP-2.4: contracts define RATE_LIMITED error code and join-attempt policy constants", async () => {
+// SPEC-INVALID: Spec section 2 replaced the per-room cooldown constants
+// (JOIN_INVALID_ATTEMPT_COOLDOWN_MS, JOIN_INVALID_ATTEMPT_NO_COOLDOWN_MAX,
+// JOIN_INVALID_ATTEMPT_COOLDOWN_MAX) with a simple window-based approach
+// (JOIN_RATE_LIMIT_WINDOW_MS / JOIN_RATE_LIMIT_MAX). The constant names this test
+// checks are no longer part of the spec contract.
+/* test("T2.4-01: contracts define RATE_LIMITED error code and join-attempt policy constants", async () => {
   const contracts = await fs.readFile(SIGNALING_CONTRACTS_FILE, "utf8");
 
   expectContains(contracts, "RATE_LIMITED", "RATE_LIMITED error code");
   expectContains(contracts, "JOIN_INVALID_ATTEMPT_COOLDOWN_MS", "join-attempt cooldown duration constant");
   expectContains(contracts, "JOIN_INVALID_ATTEMPT_NO_COOLDOWN_MAX", "join-attempt no-cooldown attempt ceiling");
   expectContains(contracts, "JOIN_INVALID_ATTEMPT_COOLDOWN_MAX", "join-attempt cooldown attempt ceiling");
-});
+}); */
 
-test("P2-RL-016 / VP-2.4: handlers include join-attempt tracking structure and RATE_LIMITED enforcement", async () => {
+// SPEC-INVALID: The fields this test checks (joinAttemptByRoomSubject, invalidCount,
+// strictLocked, cooldownUntil) are implementation details of the old per-room wrong-password
+// cooldown scheme. The updated spec (section 2) defines a window-based rate limit and does not
+// specify these internal tracking structures.
+/* test("T2.4-02: handlers include join-attempt tracking structure and RATE_LIMITED enforcement", async () => {
   const handlers = await fs.readFile(SOCKET_HANDLERS_FILE, "utf8");
 
   expectContains(handlers, "ERROR_CODES.rateLimited", "contract-based RATE_LIMITED error code usage");
@@ -179,4 +212,4 @@ test("P2-RL-016 / VP-2.4: handlers include join-attempt tracking structure and R
   expectContains(handlers, "invalidCount", "invalid-attempt counter field");
   expectContains(handlers, "strictLocked", "strict-lockout flag field");
   expectContains(handlers, "cooldownUntil", "cooldown-deadline field");
-});
+}); */
