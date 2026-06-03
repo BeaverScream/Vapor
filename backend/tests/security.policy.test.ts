@@ -10,6 +10,8 @@ const SOCKET_HANDLERS_FILE = path.resolve(process.cwd(), "src/signaling/register
 const SHARED_EVENTS_FILE = path.resolve(process.cwd(), "../shared/events.ts");
 const SHARED_PAYLOADS_FILE = path.resolve(process.cwd(), "../shared/payloads.ts");
 const SHARED_REASONS_FILE = path.resolve(process.cwd(), "../shared/reasons.ts");
+const METRICS_REGISTRY_FILE = path.resolve(process.cwd(), "src/admin/metricsRegistry.ts");
+const ADMIN_ROUTER_FILE = path.resolve(process.cwd(), "src/admin/createAdminRouter.ts");
 
 const FORBIDDEN_SECRET_PATTERNS: RegExp[] = [
   /console\.(log|info|debug|warn|error)\([^\n]*password/i,
@@ -148,7 +150,7 @@ test("T2.1-01: socket errors are emitted through the shared deterministic envelo
   expectContains(sharedPayloads, "export const SIGNALING_ERROR_MESSAGES", "shared deterministic error message map");
   expectContains(sharedPayloads, "export function createSocketErrorPayload", "shared socket error payload helper");
   expectContains(contracts, "makeSocketErrorPayload", "backend contract helper for shared error envelope");
-  expectContains(handlers, "emitSocketError(socket, ERROR_CODES", "handler-level deterministic envelope usage");
+  expectContains(handlers, "emitSocketError(socket, signaling.ERROR_CODES", "handler-level deterministic envelope usage");
   expectContains(handlers, "emitInvalidSignalPayload(socket)", "signal payload validation failure envelope usage");
 });
 
@@ -213,3 +215,147 @@ test("T1.6-01: lifecycle uses grace + precedence primitives", async () => {
   expectContains(handlers, "strictLocked", "strict-lockout flag field");
   expectContains(handlers, "cooldownUntil", "cooldown-deadline field");
 }); */
+
+// ---- T3.3 Ops, Abuse Controls ----
+test("T3.3-01 (P3-AB-001): temporary blocklist behavior stays RAM-only", async () => {
+  const handlers = await fs.readFile(SOCKET_HANDLERS_FILE, "utf8");
+
+  // Blocklist and companion create-attempt tracking are both local Maps — no external store
+  expectContains(
+    handlers,
+    "const temporaryBlocklistBySubject = new Map",
+    "blocklist declared as local in-memory Map"
+  );
+  expectContains(
+    handlers,
+    "const createAttemptsBySubject = new Map",
+    "create-attempt counter declared as local in-memory Map"
+  );
+
+  // Block expiry is a numeric TTL computed from CREATE_ROOM_BLOCK_DURATION_MS — time-bounded, not permanent
+  expectContains(
+    handlers,
+    "temporaryBlocklistBySubject.set(subject, createdAt + CREATE_ROOM_BLOCK_DURATION_MS)",
+    "block entry stores a computed expiry timestamp, not a permanent flag"
+  );
+
+  // Sweeper prunes expired blocklist entries so no durable state accumulates
+  expectContains(
+    handlers,
+    "temporaryBlocklistBySubject.delete(subject)",
+    "sweeper prunes expired blocklist entries"
+  );
+
+  // Sweeper also prunes expired create-attempt windows
+  expectContains(
+    handlers,
+    "createAttemptsBySubject.delete(subject)",
+    "sweeper prunes expired create-attempt windows"
+  );
+
+  // Neither state structure is exported — stays function-scoped inside registerSocketHandlers
+  expectNotContains(handlers, "export temporaryBlocklistBySubject", "blocklist must not be exported");
+  expectNotContains(handlers, "export createAttemptsBySubject", "create-attempt state must not be exported");
+
+  // No persistence APIs in the handler file (belt-and-suspenders check scoped to this file)
+  for (const pattern of FORBIDDEN_PERSISTENCE_PATTERNS) {
+    assert.equal(
+      pattern.test(handlers),
+      false,
+      `Persistence pattern must not appear in socket handlers: ${pattern}`
+    );
+  }
+});
+
+test("T3.3-05 (P3-AB-005): per-IP abuse counters persist within their RAM window and are not cleared by room destruction", async () => {
+  const handlers = await fs.readFile(SOCKET_HANDLERS_FILE, "utf8");
+
+  // ipAbuseByIp must be a local in-memory Map — not exported, not persisted
+  expectContains(
+    handlers,
+    "const ipAbuseByIp = new Map",
+    "per-IP abuse counter declared as local in-memory Map"
+  );
+  expectNotContains(handlers, "export ipAbuseByIp", "per-IP abuse Map must not be exported");
+
+  // Window-expiry pruning must exist in the sweeper — ipAbuseByIp.delete must be keyed on window age
+  expectContains(
+    handlers,
+    "ipAbuseByIp.delete(ip)",
+    "sweeper prunes expired per-IP abuse records"
+  );
+  expectContains(
+    handlers,
+    "IP_ABUSE_WINDOW_MS",
+    "per-IP window constant referenced for expiry check"
+  );
+
+  // destroyRoom must NOT touch ipAbuseByIp — counters must survive room teardown
+  const destroyRoomMatch = handlers.match(/const destroyRoom\s*=[\s\S]*?^  \};/m);
+  assert.ok(destroyRoomMatch, "destroyRoom function must be present in handlers");
+  const destroyRoomBody = destroyRoomMatch[0];
+  assert.equal(
+    destroyRoomBody.includes("ipAbuseByIp"),
+    false,
+    "destroyRoom must not reference ipAbuseByIp — per-IP counters must be room-agnostic"
+  );
+
+  // Both create and join paths contribute to the same per-IP record, not per-room
+  expectContains(handlers, "ipAbuseByIp.get(createIp)", "create path reads per-IP record");
+  expectContains(handlers, "ipAbuseByIp.get(joinIp)", "join path reads per-IP record");
+  expectContains(handlers, "ipAbuseByIp.set(createIp", "create path writes per-IP record");
+  expectContains(handlers, "ipAbuseByIp.set(joinIp", "join path writes per-IP record");
+
+  // No persistence APIs in the handler file (belt-and-suspenders check scoped to this file)
+  for (const pattern of FORBIDDEN_PERSISTENCE_PATTERNS) {
+    assert.equal(
+      pattern.test(handlers),
+      false,
+      `Persistence pattern must not appear in socket handlers: ${pattern}`
+    );
+  }
+});
+
+test("T3.3-02 (P3-AB-002): aggregate telemetry snapshot excludes passwords, tokens, SDP, ICE, and chat payloads", async () => {
+  const metricsContent = await fs.readFile(METRICS_REGISTRY_FILE, "utf8");
+  const adminRouterContent = await fs.readFile(ADMIN_ROUTER_FILE, "utf8");
+
+  // Snapshot fields must never carry sensitive payload data
+  const SENSITIVE_PATTERNS: Array<[RegExp, string]> = [
+    [/\bpassword\b/i,     "password field"],
+    [/reconnectToken/i,   "reconnectToken field"],
+    [/\bsdp\b/i,          "SDP payload field"],
+    [/\biceCandidate\b/i, "ICE candidate field"],
+    [/\bchat\b/i,         "chat payload field"],
+    [/\bmessage\b/i,      "message content field"],
+  ];
+
+  for (const [pattern, label] of SENSITIVE_PATTERNS) {
+    assert.equal(
+      pattern.test(metricsContent),
+      false,
+      `metricsRegistry.ts must not reference ${label}: ${pattern}`
+    );
+    assert.equal(
+      pattern.test(adminRouterContent),
+      false,
+      `createAdminRouter.ts must not reference ${label}: ${pattern}`
+    );
+  }
+
+  // Snapshot exposes only operational aggregate counts, durations, and RAM metrics
+  expectContains(metricsContent, "totalConnections:", "snapshot exposes total connection count aggregate");
+  expectContains(metricsContent, "totalJoins:", "snapshot exposes total room join count aggregate");
+  expectContains(metricsContent, "totalDestroyed:", "snapshot exposes rooms destroyed aggregate");
+  expectContains(metricsContent, "rssBytes:", "snapshot exposes RAM rss bytes metric");
+  expectContains(metricsContent, "heapUsedBytes:", "snapshot exposes heap used bytes metric");
+  expectContains(metricsContent, "averageParticipantsPerRoom", "snapshot exposes average participants per room aggregate");
+  expectContains(metricsContent, "averageLifetimeMs", "snapshot exposes average room lifetime aggregate");
+
+  // Internal tracking structures use plain identifiers and numeric counts — not payload objects
+  expectContains(metricsContent, "new Map<string, number>", "room tracking stores numeric participant counts, not payload objects");
+  expectContains(metricsContent, "new Set<string>", "socket tracking stores plain string identifiers, not payload objects");
+
+  // Admin metrics endpoint delegates entirely to the snapshot — no extra fields injected
+  expectContains(adminRouterContent, "getSnapshot()", "admin /metrics endpoint serves the registry snapshot output only");
+});

@@ -18,6 +18,8 @@ import {
   withLobbySubmitting,
   withJoinRateLimitCleared,
   withJoinRateLimited,
+  withNicknameInput,
+  withNicknameUpdated,
   withPasswordInput,
   withPeerJoined,
   withPeerLeft,
@@ -32,6 +34,7 @@ import {
   type ChatConnectionState,
   type ChatMessage,
   type HostReconnectGracePayload,
+  type NicknameUpdatedPayload,
   type PeerJoinedPayload,
   type PeerLeftPayload,
   type RoomCreatedPayload,
@@ -394,6 +397,10 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       void peerMeshRef.current?.handleSignalIce(payload)
     }
 
+    const onNicknameUpdated = (payload: NicknameUpdatedPayload): void => {
+      setState((previous) => withNicknameUpdated(previous, payload))
+    }
+
     const onHostReconnectGrace = (payload: HostReconnectGracePayload): void => {
       setState((previous) => withHostReconnectGrace(previous, payload.deadlineAt))
     }
@@ -450,6 +457,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     socket.onSignalOffer(onSignalOffer)
     socket.onSignalAnswer(onSignalAnswer)
     socket.onSignalIce(onSignalIce)
+    socket.onNicknameUpdated(onNicknameUpdated)
     socket.onHostReconnectGrace(onHostReconnectGrace)
     socket.onRoomDestroyed(onRoomDestroyed)
     socket.onError(onError)
@@ -464,6 +472,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       socket.offSignalOffer(onSignalOffer)
       socket.offSignalAnswer(onSignalAnswer)
       socket.offSignalIce(onSignalIce)
+      socket.offNicknameUpdated(onNicknameUpdated)
       socket.offHostReconnectGrace(onHostReconnectGrace)
       socket.offRoomDestroyed(onRoomDestroyed)
       socket.offError(onError)
@@ -571,14 +580,20 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       return
     }
 
-    setState((previous) => withLobbySubmitting(previous))
-
-    if (state.lobbyMode === 'create') {
-      socket.emitCreateRoom({ password: state.passwordInput })
+    const trimmedNickname = state.nicknameInput.trim()
+    if (trimmedNickname.length < 3) {
+      setState((previous) => withLobbyError(previous, UI_COPY.INVALID_NICKNAME))
       return
     }
 
-    socket.emitJoinRoom({ roomId: state.roomIdInput, password: state.passwordInput })
+    setState((previous) => withLobbySubmitting(previous))
+
+    if (state.lobbyMode === 'create') {
+      socket.emitCreateRoom({ password: state.passwordInput, nickname: trimmedNickname })
+      return
+    }
+
+    socket.emitJoinRoom({ roomId: state.roomIdInput, password: state.passwordInput, nickname: trimmedNickname })
   }
 
   const copyRoomId = async (): Promise<void> => {
@@ -697,6 +712,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       setLobbyMode: (mode) => setState((previous) => withLobbyMode(previous, mode)),
       setRoomIdInput: (value: string) => setState((previous) => withRoomIdInput(previous, value)),
       setPasswordInput: (value: string) => setState((previous) => withPasswordInput(previous, value)),
+      setNicknameInput: (value: string) => setState((previous) => withNicknameInput(previous, value)),
       submitLobby,
       copyRoomId,
       setChatDraft: (value: string) => setState((previous) => withChatDraft(previous, value)),

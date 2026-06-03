@@ -36,7 +36,7 @@ export function getErrorMessage(code: ErrorCode): string {
     case SIGNALING_ERROR_CODES.INVALID_PASSWORD:
       return 'Password is required or incorrect.'
     case SIGNALING_ERROR_CODES.INVALID_SIGNAL_PAYLOAD:
-      return 'Could not establish peer signaling. Try reconnecting.'
+      return 'Nickname is taken or invalid in this room.'
     case SIGNALING_ERROR_CODES.RATE_LIMITED:
       return 'Too many attempts. Try again later.'
     default:

@@ -58,10 +58,17 @@ type MetricsAdapter = {
   recordConnection: (socketId: string, now?: number) => void;
   recordRoomJoin: (socketId: string, roomId: string) => void;
   recordDisconnect: (socketId: string, now?: number) => void;
+  recordRoomCreated: (roomId: string, now?: number) => void;
+  recordRoomDestroyed: (roomId: string, now?: number) => void;
 };
 
 const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 60 * 1000;
 const CREATE_ATTEMPT_WINDOW_MS = 60 * 1000;
+const CREATE_ROOM_BURST_THRESHOLD = 5;
+const CREATE_ROOM_BLOCK_DURATION_MS = 10 * 60 * 1000;
+const IP_ABUSE_WINDOW_MS = 60 * 1000;
+const IP_CREATE_THRESHOLD = 10;
+const IP_JOIN_THRESHOLD = 30;
 
 type RegisterSocketHandlersArgs = {
   io: Server;
@@ -118,6 +125,12 @@ type GuestGraceRecord = {
   participantId: string;
   deadlineAt: number;
   timeoutRef?: NodeJS.Timeout;
+};
+
+type IpAbuseRecord = {
+  createCount: number;
+  joinCount: number;
+  windowStart: number;
 };
 
 const MAX_SIGNAL_IDENTIFIER_LENGTH = 128;
@@ -178,6 +191,11 @@ function deriveJoinAttemptSubject(socket: Socket): string {
   }
 
   return `${ip}|${userAgent}|${clientFingerprint}`;
+}
+
+function deriveIp(socket: Socket): string {
+  const socketLike = socket as Socket & { handshake?: { address?: string } };
+  return socketLike.handshake?.address ?? "unknown-ip";
 }
 
 function makeJoinAttemptKey(roomId: string, subject: string): string {
@@ -306,6 +324,7 @@ export function registerSocketHandlers({
   const createAttemptsBySubject = new Map<string, { count: number; firstAt: number }>();
   const temporaryBlocklistBySubject = new Map<string, number>();
   const roomLockChains = new Map<string, Promise<void>>();
+  const ipAbuseByIp = new Map<string, IpAbuseRecord>();
 
   const clearGuestGrace = (participantId: string): void => {
     const grace = guestGraceByParticipant.get(participantId);
@@ -446,6 +465,8 @@ export function registerSocketHandlers({
     roomId: string,
     reason: RoomDestroyedPayload["reason"],
   ): void => {
+    metrics.recordRoomDestroyed(roomId, now());
+
     // Step 1: Clear host timers (TTL, solo, host grace) before any state mutation
     const policy = roomPolicyById.get(roomId);
     if (policy) {
@@ -725,19 +746,28 @@ export function registerSocketHandlers({
           return;
         }
 
+        const createIp = deriveIp(socket);
+        const createIpTs = now();
+        let ipCreateRecord = ipAbuseByIp.get(createIp);
+        if (!ipCreateRecord || createIpTs - ipCreateRecord.windowStart > IP_ABUSE_WINDOW_MS) {
+          ipCreateRecord = { createCount: 0, joinCount: 0, windowStart: createIpTs };
+          ipAbuseByIp.set(createIp, ipCreateRecord);
+        }
+        ipCreateRecord.createCount += 1;
+        if (ipCreateRecord.createCount > IP_CREATE_THRESHOLD) {
+          emitRateLimited(socket);
+          return;
+        }
+
         const createdAt = now();
-        // record create attempts for abuse detection
-        const windowMs = 60 * 1000;
-        const thresh = 5;
-        const blockMs = 10 * 60 * 1000;
         const prev = createAttemptsBySubject.get(subject);
-        if (!prev || createdAt - prev.firstAt > windowMs) {
+        if (!prev || createdAt - prev.firstAt > CREATE_ATTEMPT_WINDOW_MS) {
           createAttemptsBySubject.set(subject, { count: 1, firstAt: createdAt });
         } else {
           prev.count += 1;
           createAttemptsBySubject.set(subject, prev);
-          if (prev.count > thresh) {
-            temporaryBlocklistBySubject.set(subject, createdAt + blockMs);
+          if (prev.count > CREATE_ROOM_BURST_THRESHOLD) {
+            temporaryBlocklistBySubject.set(subject, createdAt + CREATE_ROOM_BLOCK_DURATION_MS);
             createAttemptsBySubject.delete(subject);
             emitRateLimited(socket);
             return;
@@ -776,6 +806,7 @@ export function registerSocketHandlers({
 
         socket.join(room.roomId);
         metrics.recordRoomJoin(socket.id, room.roomId);
+        metrics.recordRoomCreated(room.roomId, createdAt);
 
         const response: RoomCreatedPayload = {
           roomId: room.roomId,
@@ -837,6 +868,18 @@ export function registerSocketHandlers({
         ) {
           joinAttempt.cooldownUntil = undefined;
           joinAttemptByRoomSubject.set(joinAttemptKey, joinAttempt);
+        }
+
+        const joinIp = deriveIp(socket);
+        let ipJoinRecord = ipAbuseByIp.get(joinIp);
+        if (!ipJoinRecord || attemptTimestamp - ipJoinRecord.windowStart > IP_ABUSE_WINDOW_MS) {
+          ipJoinRecord = { createCount: 0, joinCount: 0, windowStart: attemptTimestamp };
+          ipAbuseByIp.set(joinIp, ipJoinRecord);
+        }
+        ipJoinRecord.joinCount += 1;
+        if (ipJoinRecord.joinCount > IP_JOIN_THRESHOLD) {
+          emitRateLimited(socket);
+          return;
         }
 
         const normalizedNickname = normalizeNickname(payload?.nickname);
@@ -1110,6 +1153,7 @@ export function registerSocketHandlers({
             peers,
             reconnectToken: freshToken,
             expiresAt: policy?.expiresAt ?? room.createdAt + signaling.ROOM_MAX_DURATION_MS,
+            participantNickname: participant.nickname ?? null,
             participantCount: room.participants.size,
           };
 
@@ -1175,7 +1219,7 @@ export function registerSocketHandlers({
 
     socket.on(
       signaling.CLIENT_EVENTS.nicknameUpdate,
-      (payload: NicknameUpdatePayload | undefined) => {
+      async (payload: NicknameUpdatePayload | undefined) => {
         const participantId = state.socketToParticipant.get(socket.id);
         if (!participantId) {
           emitRoomNotFound(socket);
@@ -1188,52 +1232,53 @@ export function registerSocketHandlers({
           return;
         }
 
-        const room = state.rooms.get(roomId);
-        if (!room) {
-          emitRoomNotFound(socket);
-          return;
-        }
-
         const normalizedNickname = normalizeNickname(payload?.nickname);
         if (!normalizedNickname) {
           emitInvalidSignalPayload(socket);
           return;
         }
 
-        const participant = room.participants.get(participantId);
-        if (!participant) {
-          emitRoomNotFound(socket);
-          return;
-        }
+        await withRoomLock(roomId, () => {
+          const room = state.rooms.get(roomId);
+          if (!room) {
+            emitRoomNotFound(socket);
+            return;
+          }
 
-        const nowTs = now();
-        const cooldown = signaling.NICKNAME_CHANGE_COOLDOWN_MS;
-        if (participant.nicknameUpdatedAt && nowTs < participant.nicknameUpdatedAt + cooldown) {
-          emitRateLimited(socket);
-          return;
-        }
+          const participant = room.participants.get(participantId);
+          if (!participant) {
+            emitRoomNotFound(socket);
+            return;
+          }
 
-        const key = normalizedNickname.toLowerCase();
-        const existing = room.nicknameToParticipant.get(key);
-        if (existing && existing !== participantId) {
-          emitInvalidSignalPayload(socket);
-          return;
-        }
+          const nowTs = now();
+          const cooldown = signaling.NICKNAME_CHANGE_COOLDOWN_MS;
+          if (participant.nicknameUpdatedAt && nowTs < participant.nicknameUpdatedAt + cooldown) {
+            emitRateLimited(socket);
+            return;
+          }
 
-        // update mapping
-        if (participant.nickname) {
-          room.nicknameToParticipant.delete(participant.nickname.toLowerCase());
-        }
-        participant.nickname = normalizedNickname;
-        participant.nicknameUpdatedAt = nowTs;
-        room.nicknameToParticipant.set(key, participantId);
+          const key = normalizedNickname.toLowerCase();
+          const existing = room.nicknameToParticipant.get(key);
+          if (existing && existing !== participantId) {
+            emitInvalidSignalPayload(socket);
+            return;
+          }
 
-        const updatePayload = {
-          participantId,
-          nickname: normalizedNickname,
-        } as NicknameUpdatedPayload;
+          if (participant.nickname) {
+            room.nicknameToParticipant.delete(participant.nickname.toLowerCase());
+          }
+          participant.nickname = normalizedNickname;
+          participant.nicknameUpdatedAt = nowTs;
+          room.nicknameToParticipant.set(key, participantId);
 
-        io.to(roomId).emit(signaling.SERVER_EVENTS.nicknameUpdated, updatePayload);
+          const updatePayload = {
+            participantId,
+            nickname: normalizedNickname,
+          } as NicknameUpdatedPayload;
+
+          io.to(roomId).emit(signaling.SERVER_EVENTS.nicknameUpdated, updatePayload);
+        });
       },
     );
 
@@ -1245,6 +1290,7 @@ export function registerSocketHandlers({
       }
 
       if (removed && !removed.roomStillActive) {
+        metrics.recordRoomDestroyed(removed.roomId, now());
         clearRoomArtifacts(removed.roomId);
       }
       metrics.recordDisconnect(socket.id);
@@ -1294,6 +1340,7 @@ export function registerSocketHandlers({
       const removed = removeParticipantBySocket(state, socket.id);
       emitParticipantExit(socket, removed, "disconnect");
       if (removed && !removed.roomStillActive) {
+        metrics.recordRoomDestroyed(removed.roomId, now());
         clearRoomArtifacts(removed.roomId);
       }
 
@@ -1327,6 +1374,12 @@ export function registerSocketHandlers({
     for (const [subject, attempt] of Array.from(createAttemptsBySubject.entries())) {
       if (nowTs - attempt.firstAt > CREATE_ATTEMPT_WINDOW_MS) {
         createAttemptsBySubject.delete(subject);
+      }
+    }
+
+    for (const [ip, record] of Array.from(ipAbuseByIp.entries())) {
+      if (nowTs - record.windowStart > IP_ABUSE_WINDOW_MS) {
+        ipAbuseByIp.delete(ip);
       }
     }
 

@@ -5,6 +5,7 @@ import {
   type CreateRoomPayload,
   type HostReconnectGracePayload as SharedHostReconnectGracePayload,
   type JoinRoomPayload,
+  type NicknameUpdatedPayload as SharedNicknameUpdatedPayload,
   type PeerJoinedPayload as SharedPeerJoinedPayload,
   type PeerLeftPayload as SharedPeerLeftPayload,
   type ResumeSessionPayload as SharedResumeSessionPayload,
@@ -37,6 +38,7 @@ export const SERVER_EVENTS = {
   ROOM_JOINED: SERVER_EVENT_NAMES.ROOM_JOINED,
   PEER_JOINED: SERVER_EVENT_NAMES.PEER_JOINED,
   PEER_LEFT: SERVER_EVENT_NAMES.PEER_LEFT,
+  NICKNAME_UPDATED: SERVER_EVENT_NAMES.NICKNAME_UPDATED,
   SIGNAL_OFFER: SERVER_EVENT_NAMES.SIGNAL_OFFER,
   SIGNAL_ANSWER: SERVER_EVENT_NAMES.SIGNAL_ANSWER,
   SIGNAL_ICE: SERVER_EVENT_NAMES.SIGNAL_ICE,
@@ -79,6 +81,8 @@ export interface ChatMessage {
   sentAtMs: number
   direction: 'outgoing' | 'incoming'
 }
+
+export type NicknameUpdatedPayload = SharedNicknameUpdatedPayload
 
 export type RoomCreatedPayload = SharedRoomCreatedPayload
 
@@ -128,6 +132,7 @@ export interface RoomSessionState {
   lobbyMode: LobbyMode
   roomIdInput: string
   passwordInput: string
+  nicknameInput: string
   screen: Screen
   lobbyStatus: LobbyStatus
   errorMessage: string | null
@@ -147,12 +152,14 @@ export interface RoomSessionState {
   copyFeedback: string | null
   joinRateLimitUntil: number | null
   joinRateLimitRoomId: string | null
+  participantNicknames: Record<string, string>
 }
 
 export interface RoomSessionActions {
   setLobbyMode: (mode: LobbyMode) => void
   setRoomIdInput: (value: string) => void
   setPasswordInput: (value: string) => void
+  setNicknameInput: (value: string) => void
   submitLobby: () => void
   copyRoomId: () => Promise<void>
   leaveRoom: () => void
@@ -169,6 +176,7 @@ export interface RoomSocketClient {
   onPeerJoined: (handler: (payload: PeerJoinedPayload) => void) => void
   onPeerLeft: (handler: (payload: PeerLeftPayload) => void) => void
   onHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) => void
+  onNicknameUpdated: (handler: (payload: NicknameUpdatedPayload) => void) => void
   onRoomDestroyed: (handler: (payload: RoomDestroyedPayload) => void) => void
   onError: (handler: (payload: SocketErrorPayload) => void) => void
   onSignalOffer: (handler: (payload: SignalOfferRelayPayload) => void) => void
@@ -181,6 +189,7 @@ export interface RoomSocketClient {
   offPeerJoined: (handler: (payload: PeerJoinedPayload) => void) => void
   offPeerLeft: (handler: (payload: PeerLeftPayload) => void) => void
   offHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) => void
+  offNicknameUpdated: (handler: (payload: NicknameUpdatedPayload) => void) => void
   offRoomDestroyed: (handler: (payload: RoomDestroyedPayload) => void) => void
   offError: (handler: (payload: SocketErrorPayload) => void) => void
   offSignalOffer: (handler: (payload: SignalOfferRelayPayload) => void) => void

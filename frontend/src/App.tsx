@@ -63,6 +63,7 @@ function App() {
           lobbyMode={derived.lobbyMode}
           roomIdInput={state.roomIdInput}
           passwordInput={state.passwordInput}
+          nicknameInput={state.nicknameInput}
           isSubmitting={state.lobbyStatus === 'submitting'}
           isPrimaryDisabled={derived.isPrimaryDisabled}
           joinRateLimitHint={derived.joinRateLimitHint}
@@ -71,6 +72,7 @@ function App() {
           onLobbyModeChange={actions.setLobbyMode}
           onRoomIdChange={actions.setRoomIdInput}
           onPasswordChange={actions.setPasswordInput}
+          onNicknameChange={actions.setNicknameInput}
           onSubmit={actions.submitLobby}
         />
       )}
@@ -81,6 +83,7 @@ function App() {
           participantId={state.participantId}
           participantCount={state.participantCount}
           participants={state.participants}
+          participantNicknames={state.participantNicknames}
           roomStatus={derived.roomStatus}
           chatStatusText={derived.chatStatusText}
           soloWaitingChipText={derived.soloWaitingChipText}

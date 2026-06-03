@@ -1,6 +1,7 @@
 import type {
   ChatConnectionState,
   ChatMessage,
+  NicknameUpdatedPayload,
   Participant,
   PeerJoinedPayload,
   PeerLeftPayload,
@@ -17,6 +18,7 @@ export function createInitialRoomSessionState(): RoomSessionState {
     lobbyMode: 'create',
     roomIdInput: '',
     passwordInput: '',
+    nicknameInput: '',
     screen: 'lobby',
     lobbyStatus: 'idle',
     errorMessage: null,
@@ -36,6 +38,7 @@ export function createInitialRoomSessionState(): RoomSessionState {
     copyFeedback: null,
     joinRateLimitUntil: null,
     joinRateLimitRoomId: null,
+    participantNicknames: {},
   }
 }
 
@@ -66,6 +69,9 @@ export function withRoomCreated(state: RoomSessionState, payload: RoomCreatedPay
     copyFeedback: null,
     joinRateLimitUntil: null,
     joinRateLimitRoomId: null,
+    participantNicknames: payload.participantNickname
+      ? { [payload.participantId]: payload.participantNickname }
+      : {},
   }
 }
 
@@ -98,6 +104,9 @@ export function withRoomJoined(state: RoomSessionState, payload: RoomJoinedPaylo
     copyFeedback: null,
     joinRateLimitUntil: null,
     joinRateLimitRoomId: null,
+    participantNicknames: payload.participantNickname
+      ? { [payload.participantId]: payload.participantNickname }
+      : {},
   }
 }
 
@@ -119,6 +128,16 @@ export function withPeerLeft(state: RoomSessionState, payload: PeerLeftPayload):
     ...state,
     participants: state.participants.filter((participant) => participant.participantId !== payload.participantId),
     participantCount: payload.participantCount,
+  }
+}
+
+export function withNicknameUpdated(state: RoomSessionState, payload: NicknameUpdatedPayload): RoomSessionState {
+  return {
+    ...state,
+    participantNicknames: {
+      ...state.participantNicknames,
+      [payload.participantId]: payload.nickname,
+    },
   }
 }
 
@@ -240,9 +259,11 @@ export function withRoomEnded(state: RoomSessionState, reason?: string): RoomSes
     connectedPeerCount: 0,
     hostReconnectGraceDeadlineAt: null,
     passwordInput: '',
+    nicknameInput: '',
     copyFeedback: null,
     joinRateLimitUntil: null,
     joinRateLimitRoomId: null,
+    participantNicknames: {},
   }
 }
 
@@ -266,9 +287,11 @@ export function resetToLobby(state: RoomSessionState): RoomSessionState {
     connectedPeerCount: 0,
     hostReconnectGraceDeadlineAt: null,
     passwordInput: '',
+    nicknameInput: '',
     copyFeedback: null,
     joinRateLimitUntil: null,
     joinRateLimitRoomId: null,
+    participantNicknames: {},
   }
 }
 
@@ -295,5 +318,12 @@ export function withPasswordInput(state: RoomSessionState, passwordInput: string
   return {
     ...state,
     passwordInput,
+  }
+}
+
+export function withNicknameInput(state: RoomSessionState, nicknameInput: string): RoomSessionState {
+  return {
+    ...state,
+    nicknameInput,
   }
 }

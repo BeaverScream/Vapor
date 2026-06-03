@@ -36,9 +36,21 @@ Closing the browser is treated as an unexpected disconnect (not an explicit leav
 ### Q: Can I see who else is in the room?
 
 **A:**  
-Yes. When you join, server sends you a list of current participants (by ID only, not real names). When others join/leave, you're notified in real-time.
+Yes. When you join, you see all current participants by their room nickname. When others join or leave, you're notified in real-time.
 
-**Privacy note:** You see anonymized participant IDs, not email addresses or identifiable info.
+**Privacy note:** Nicknames are room-scoped and ephemeral — they exist only for the lifetime of a single session in a single room and are never linked to accounts or persistent identity.
+
+---
+
+### Q: Are nicknames permanent or linked to my identity?
+
+**A:**  
+No. Nicknames are ephemeral and room-scoped only.
+
+- They exist in server RAM for the duration of the room and are purged when the room is destroyed or the server restarts.
+- Each room maintains its own nickname namespace — the same nickname can exist in different rooms at the same time.
+- On reconnect within the grace window, your nickname is automatically reclaimed so the session continues with the same identity.
+- Nickname conflicts within a room are rejected deterministically with a clear error — trying again with a different name resolves it immediately.
 
 ---
 

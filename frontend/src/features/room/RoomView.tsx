@@ -10,6 +10,7 @@ interface RoomViewProps {
   participantId: string | null
   participantCount: number
   participants: Participant[]
+  participantNicknames: Record<string, string>
   roomStatus: string
   chatStatusText: string
   soloWaitingChipText: string | null
@@ -55,9 +56,10 @@ function displayParticipantId(participantId: string): string {
 interface ParticipantsRosterProps {
   participants: Participant[]
   participantId: string | null
+  participantNicknames: Record<string, string>
 }
 
-const ParticipantsRoster = memo(function ParticipantsRoster({ participants, participantId }: ParticipantsRosterProps) {
+const ParticipantsRoster = memo(function ParticipantsRoster({ participants, participantId, participantNicknames }: ParticipantsRosterProps) {
   return (
     <ul className="vapor-scroll flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-md border border-white/15 bg-background/35 p-3">
       {participants.map((participant) => {
@@ -71,14 +73,15 @@ const ParticipantsRoster = memo(function ParticipantsRoster({ participants, part
               : null
 
         const toneClassName = getParticipantTone(participant.participantId)
+        const displayName = participantNicknames[participant.participantId] ?? displayParticipantId(participant.participantId)
 
         return (
           <li
             key={participant.participantId}
             className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/20 bg-background/55 px-2.5 py-1.5"
           >
-            <span className={cn('rounded-full border px-2 py-0.5 font-mono text-[11px] tracking-wide', toneClassName)} title={participant.participantId}>
-              {displayParticipantId(participant.participantId)}
+            <span className={cn('rounded-full border px-2 py-0.5 text-[11px] tracking-wide', toneClassName)} title={participant.participantId}>
+              {displayName}
             </span>
 
             {roleText ? (
@@ -95,9 +98,10 @@ const ParticipantsRoster = memo(function ParticipantsRoster({ participants, part
 
 interface MessageFeedProps {
   chatMessages: ChatMessage[]
+  participantNicknames: Record<string, string>
 }
 
-const MessageFeed = memo(function MessageFeed({ chatMessages }: MessageFeedProps) {
+const MessageFeed = memo(function MessageFeed({ chatMessages, participantNicknames }: MessageFeedProps) {
   const feedEndRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -117,6 +121,7 @@ const MessageFeed = memo(function MessageFeed({ chatMessages }: MessageFeedProps
       <ul className="grid gap-2">
         {chatMessages.map((message) => {
           const isOutgoing = message.direction === 'outgoing'
+          const senderName = participantNicknames[message.senderParticipantId] ?? displayParticipantId(message.senderParticipantId)
 
           return (
             <li
@@ -133,12 +138,12 @@ const MessageFeed = memo(function MessageFeed({ chatMessages }: MessageFeedProps
                 ) : (
                   <span
                     className={cn(
-                      'inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] normal-case tracking-normal',
+                      'inline-flex rounded-full border px-2 py-0.5 text-[10px] normal-case tracking-normal',
                       getParticipantTone(message.senderParticipantId),
                     )}
                     title={message.senderParticipantId}
                   >
-                    {displayParticipantId(message.senderParticipantId)}
+                    {senderName}
                   </span>
                 )}
               </p>
@@ -157,6 +162,7 @@ export function RoomView({
   participantId,
   participantCount,
   participants,
+  participantNicknames,
   roomStatus,
   chatStatusText,
   soloWaitingChipText,
@@ -249,7 +255,7 @@ export function RoomView({
           >
             <div className="overflow-hidden">
               <div id="participants-roster" className={cn(!isParticipantListOpen && 'pointer-events-none')}>
-                <ParticipantsRoster participants={participants} participantId={participantId} />
+                <ParticipantsRoster participants={participants} participantId={participantId} participantNicknames={participantNicknames} />
               </div>
             </div>
           </div>
@@ -261,7 +267,7 @@ export function RoomView({
             {chatStatusText}
           </p>
 
-          <MessageFeed chatMessages={chatMessages} />
+          <MessageFeed chatMessages={chatMessages} participantNicknames={participantNicknames} />
 
           <form className="flex gap-2" onSubmit={handleChatSubmit}>
             <label htmlFor="chat-input" className="sr-only">

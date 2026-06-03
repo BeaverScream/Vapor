@@ -10,6 +10,7 @@ interface LobbyViewProps {
   lobbyMode: LobbyMode
   roomIdInput: string
   passwordInput: string
+  nicknameInput: string
   isSubmitting: boolean
   isPrimaryDisabled: boolean
   joinRateLimitHint: string | null
@@ -18,6 +19,7 @@ interface LobbyViewProps {
   onLobbyModeChange: (mode: LobbyMode) => void
   onRoomIdChange: (value: string) => void
   onPasswordChange: (value: string) => void
+  onNicknameChange: (value: string) => void
   onSubmit: () => void
 }
 
@@ -25,6 +27,7 @@ export function LobbyView({
   lobbyMode,
   roomIdInput,
   passwordInput,
+  nicknameInput,
   isSubmitting,
   isPrimaryDisabled,
   joinRateLimitHint,
@@ -33,6 +36,7 @@ export function LobbyView({
   onLobbyModeChange,
   onRoomIdChange,
   onPasswordChange,
+  onNicknameChange,
   onSubmit,
 }: LobbyViewProps) {
   return (
@@ -108,6 +112,21 @@ export function LobbyView({
               onChange={(event) => onPasswordChange(event.target.value)}
               placeholder="Required"
               autoComplete="off"
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="nickname-input">Nickname</Label>
+            <Input
+              id="nickname-input"
+              value={nicknameInput}
+              onChange={(event) => onNicknameChange(event.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="3–24 characters"
+              maxLength={24}
             />
           </div>
 

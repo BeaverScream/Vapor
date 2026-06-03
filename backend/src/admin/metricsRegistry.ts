@@ -2,6 +2,8 @@ type Totals = {
   totalConnections: number;
   totalRoomJoins: number;
   cumulativeConnectionMs: number;
+  cumulativeRoomLifetimeMs: number;
+  totalRoomsDestroyed: number;
 };
 
 type MetricsSnapshot = {
@@ -22,6 +24,10 @@ type MetricsSnapshot = {
   rooms: {
     active: number;
     totalJoins: number;
+    totalDestroyed: number;
+    totalParticipants: number;
+    averageParticipantsPerRoom: number;
+    averageLifetimeMs: number;
   };
 };
 
@@ -30,11 +36,14 @@ export function createMetricsRegistry() {
   const activeRooms = new Map<string, number>();
   const socketConnectedAt = new Map<string, number>();
   const socketRoomMembership = new Map<string, Set<string>>();
+  const roomCreatedAt = new Map<string, number>();
 
   const totals: Totals = {
     totalConnections: 0,
     totalRoomJoins: 0,
-    cumulativeConnectionMs: 0
+    cumulativeConnectionMs: 0,
+    cumulativeRoomLifetimeMs: 0,
+    totalRoomsDestroyed: 0,
   };
 
   const startedAt = Date.now();
@@ -93,6 +102,20 @@ export function createMetricsRegistry() {
       socketRoomMembership.delete(socketId);
     },
 
+    recordRoomCreated(roomId: string, now = Date.now()): void {
+      roomCreatedAt.set(roomId, now);
+    },
+
+    recordRoomDestroyed(roomId: string, now = Date.now()): void {
+      const createdAt = roomCreatedAt.get(roomId);
+      if (typeof createdAt === "number") {
+        totals.cumulativeRoomLifetimeMs += Math.max(0, now - createdAt);
+        roomCreatedAt.delete(roomId);
+      }
+      totals.totalRoomsDestroyed += 1;
+      activeRooms.delete(roomId);
+    },
+
     snapshot(now = Date.now()): MetricsSnapshot {
       let activeConnectionMs = 0;
       for (const connectedAt of socketConnectedAt.values()) {
@@ -102,6 +125,22 @@ export function createMetricsRegistry() {
       const totalConnectionMs = totals.cumulativeConnectionMs + activeConnectionMs;
       const memoryUsage = process.memoryUsage();
 
+      let totalParticipants = 0;
+      for (const count of activeRooms.values()) {
+        totalParticipants += count;
+      }
+
+      const activeRoomCount = activeRooms.size;
+      const averageParticipantsPerRoom =
+        activeRoomCount > 0
+          ? Number((totalParticipants / activeRoomCount).toFixed(2))
+          : 0;
+
+      const averageLifetimeMs =
+        totals.totalRoomsDestroyed > 0
+          ? Math.round(totals.cumulativeRoomLifetimeMs / totals.totalRoomsDestroyed)
+          : 0;
+
       return {
         generatedAt: now,
         serverStartedAt: startedAt,
@@ -110,18 +149,22 @@ export function createMetricsRegistry() {
           rssBytes: memoryUsage.rss,
           heapTotalBytes: memoryUsage.heapTotal,
           heapUsedBytes: memoryUsage.heapUsed,
-          externalBytes: memoryUsage.external
+          externalBytes: memoryUsage.external,
         },
         users: {
           active: connectedSockets.size,
           totalConnections: totals.totalConnections,
-          totalConnectionHours: Number((totalConnectionMs / 3_600_000).toFixed(4))
+          totalConnectionHours: Number((totalConnectionMs / 3_600_000).toFixed(4)),
         },
         rooms: {
-          active: activeRooms.size,
-          totalJoins: totals.totalRoomJoins
-        }
+          active: activeRoomCount,
+          totalJoins: totals.totalRoomJoins,
+          totalDestroyed: totals.totalRoomsDestroyed,
+          totalParticipants,
+          averageParticipantsPerRoom,
+          averageLifetimeMs,
+        },
       };
-    }
+    },
   };
 }

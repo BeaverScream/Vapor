@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const registerSocketHandlersFile = path.resolve(process.cwd(), '../backend/src/signaling/registerSocketHandlers.ts')
+const backendStateFile = path.resolve(process.cwd(), '../backend/src/signaling/state.ts')
 const appFile = path.resolve(process.cwd(), 'src/App.tsx')
 const indexCssFile = path.resolve(process.cwd(), 'src/index.css')
 const roomViewFile = path.resolve(process.cwd(), 'src/features/room/RoomView.tsx')
@@ -108,7 +109,7 @@ test('T2.6-03: frontend WebRTC signaling and RAM-only chat state wiring remain l
   expectContains(stateUtils, "chatDraft: ''", 'chat draft reset to volatile memory')
 
   expectContains(roomView, 'aria-label="Peer chat"', 'chat landmark for accessibility')
-  expectContains(roomView, 'onSendChatMessage()', 'chat submit trigger')
+  expectContains(roomView, 'onSendChatMessage(trimmedMessage)', 'chat submit trigger')
   expectContains(mesh, 'iceServers: WEBRTC_ICE_SERVERS', 'configurable ICE server policy')
   expectContains(mesh, 'kind: \'peer_connection_state\'', 'safe peer connection state telemetry')
   expectContains(mesh, 'kind: \'data_channel_state\'', 'safe data channel state telemetry')
@@ -159,7 +160,7 @@ test('T2.7-01: frontend ICE config and telemetry safety wiring remain locked', a
 
 test('T0.1-07: FE join emit preserves exact roomId input text', async () => {
   const content = await readFile(useRoomFile, 'utf8')
-  expectContains(content, 'socket.emitJoinRoom({ roomId: state.roomIdInput, password: state.passwordInput })', 'exact roomId join emission')
+  expectContains(content, 'socket.emitJoinRoom({ roomId: state.roomIdInput, password: state.passwordInput, nickname: trimmedNickname })', 'exact roomId join emission')
 })
 
 // ---- UI Shell ----
@@ -253,6 +254,80 @@ test('T1.6-02: canonical room_destroyed reasons and solo-timeout messaging hooks
   expectContains(useRoom, 'withRoomEnded(previous, payload.reason)', 'payload-driven room destroy handling')
   expectContains(roomSocketClient, 'SERVER_EVENTS.HOST_RECONNECT_GRACE', 'host reconnect grace socket contract wiring')
   expectContains(useRoom, 'withHostReconnectGrace(previous, payload.deadlineAt)', 'host reconnect grace state handling')
+})
+
+// ---- VP-3.2 User Identity & UX ----
+test('T3.2-05 (P3-NK-005): reconnect flow restores participant identity and nickname', async () => {
+  const types = await readFile(typesFile, 'utf8')
+  const stateUtils = await readFile(stateUtilsFile, 'utf8')
+  const useRoom = await readFile(useRoomFile, 'utf8')
+  const socketClient = await readFile(roomSocketClientFile, 'utf8')
+
+  // Nickname map is part of the persistent room session identity
+  expectContains(types, 'participantNicknames: Record<string, string>', 'participantNicknames identity map on RoomSessionState')
+
+  // resume_session responds with room_joined which carries the reclaimed nickname;
+  // withRoomJoined must seed participantNicknames from payload.participantNickname
+  expectContains(stateUtils, 'payload.participantNickname', 'nickname restored from room_joined payload on resume')
+
+  // room_joined is the single handler for both initial join and resume;
+  // it always refreshes the reconnect token so the identity chain stays valid
+  expectContains(useRoom, 'writeStoredReconnectSession({ roomId: payload.roomId, reconnectToken: payload.reconnectToken })', 'reconnect token refreshed on every room_joined including resume')
+
+  // Both resume guards must be cleared on a successful room_joined so a subsequent
+  // disconnect can trigger a clean new reconnect cycle
+  expectContains(useRoom, 'resumeInFlightRef.current = false', 'resumeInFlightRef cleared on successful room_joined')
+  expectContains(useRoom, 'autoResumeRequestedRef.current = false', 'autoResumeRequestedRef cleared on successful room_joined')
+
+  // Nickname changes broadcast after reconnect must be applied to the identity map
+  expectContains(useRoom, 'socket.onNicknameUpdated(onNicknameUpdated)', 'nickname_updated subscription active after reconnect')
+
+  // Nickname state must be scrubbed on room destruction so stale identity cannot bleed into new sessions
+  expectContains(stateUtils, 'participantNicknames: {}', 'nickname map cleared on room end and lobby reset')
+
+  // Socket client must route nickname_updated through the shared server event constant
+  expectContains(socketClient, 'socket.on(SERVER_EVENTS.NICKNAME_UPDATED, handler)', 'nickname_updated socket event listener wiring')
+})
+
+// ---- T3.3 Ops, Abuse Controls & Tests ----
+
+test('T3.3-04 (P3-AB-004): lifecycle edge case contract coverage — TTL expiry, solo-timeout, and quota removal are verifiable', async () => {
+  const handlers = await readFile(registerSocketHandlersFile, 'utf8')
+  const stateSource = await readFile(backendStateFile, 'utf8')
+  const sharedReasons = await readFile(sharedReasonsFile, 'utf8')
+  const sharedPolicy = await readFile(sharedPolicyFile, 'utf8')
+
+  // TTL expiry: backend wires the room TTL timer to destroy with room_ttl_expired
+  expectContains(handlers, '"room_ttl_expired"', 'room_ttl_expired reason used in TTL timer callback')
+  expectContains(handlers, 'ROOM_MAX_DURATION_MS', 'ROOM_MAX_DURATION_MS used as TTL timeout duration in handler')
+  expectContains(sharedReasons, 'ROOM_TTL_EXPIRED: "room_ttl_expired"', 'room_ttl_expired reason declared in shared reasons')
+  expectContains(sharedPolicy, 'ROOM_MAX_DURATION_MS', 'TTL duration constant present in shared policy')
+
+  // Solo-timeout: backend wires the solo host timer to destroy with solo_timeout_expired
+  expectContains(handlers, '"solo_timeout_expired"', 'solo_timeout_expired reason used in solo-host timer callback')
+  expectContains(handlers, 'SOLO_HOST_ROOM_TIMEOUT_MS', 'SOLO_HOST_ROOM_TIMEOUT_MS used as solo timer duration in handler')
+  expectContains(sharedReasons, 'SOLO_TIMEOUT_EXPIRED: "solo_timeout_expired"', 'solo_timeout_expired reason declared in shared reasons')
+  expectContains(sharedPolicy, 'SOLO_HOST_ROOM_TIMEOUT_MS', 'Solo-host timeout constant present in shared policy')
+
+  // Solo-timeout state: soloHostDeadlineAt is included in room_created payload so clients can show countdown
+  expectContains(handlers, 'soloHostDeadlineAt: policy.soloHostDeadlineAt', 'soloHostDeadlineAt included in room_created payload')
+
+  // Quota removal: no per-subject active-room quota mechanism exists in state or handler (BL-QUOTA-01/02/03)
+  assert.equal(
+    stateSource.includes('createQuotaBySubject'),
+    false,
+    'State must not contain createQuotaBySubject — per-subject room quota system has been removed'
+  )
+  assert.equal(
+    handlers.includes('createQuotaBySubject'),
+    false,
+    'Handler must not reference createQuotaBySubject — quota system removed in favor of burst rate limiting'
+  )
+
+  // Burst rate limiting: abuse control uses a temporary in-memory blocklist, not per-room quotas (BL-QUOTA-03)
+  expectContains(handlers, 'temporaryBlocklistBySubject', 'Abuse control uses temporary in-memory blocklist, not quotas')
+  expectContains(handlers, 'createAttemptsBySubject', 'Create-room burst window is tracked per-subject in RAM only')
+  expectContains(handlers, 'CREATE_ROOM_BURST_THRESHOLD', 'Burst threshold constant gates the blocklist trigger')
 })
 
 // ---- VP-3.1 Security & Housekeeping ----
