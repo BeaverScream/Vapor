@@ -1,12 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createVaporServer } from "../src/server";
-import { CLIENT_EVENTS, GUEST_DISCONNECT_GRACE_MS, HOST_DISCONNECT_GRACE_MS, NICKNAME_CHANGE_COOLDOWN_MS, SERVER_EVENTS, SOLO_HOST_ROOM_TIMEOUT_MS } from "../src/signaling/contracts";
+import { CLIENT_EVENTS, GUEST_DISCONNECT_GRACE_MS, HOST_DISCONNECT_GRACE_MS, JOIN_INVALID_ATTEMPT_COOLDOWN_MS, JOIN_INVALID_ATTEMPT_NO_COOLDOWN_MAX, NICKNAME_CHANGE_COOLDOWN_MS, SERVER_EVENTS, SOLO_HOST_ROOM_TIMEOUT_MS } from "../src/signaling/contracts";
 import { registerSocketHandlers } from "../src/signaling/registerSocketHandlers";
 import { createPhase0State, getPhase0StateSnapshot } from "../src/signaling/state";
 
 type EventPayload = unknown;
 type EventHandler = (payload: EventPayload) => void;
+
+type FakeSocketOptions = {
+  address?: string;
+  fingerprint?: string;
+};
 
 class FakeIo {
   private connectionHandler: ((socket: FakeSocket) => void) | null = null;
@@ -19,8 +24,8 @@ class FakeIo {
     }
   }
 
-  connect(socketId: string): FakeSocket {
-    const socket = new FakeSocket(this, socketId);
+  connect(socketId: string, options?: FakeSocketOptions): FakeSocket {
+    const socket = new FakeSocket(this, socketId, options);
     this.socketsById.set(socketId, socket);
     this.connectionHandler?.(socket);
     return socket;
@@ -71,12 +76,22 @@ class FakeIo {
 
 class FakeSocket {
   readonly id: string;
+  readonly handshake?: {
+    address?: string;
+    auth?: { clientFingerprint?: string };
+  };
 
   private handlers = new Map<string, EventHandler>();
   private inboundEvents: Array<{ event: string; payload: EventPayload }> = [];
 
-  constructor(private io: FakeIo, socketId: string) {
+  constructor(private io: FakeIo, socketId: string, options?: FakeSocketOptions) {
     this.id = socketId;
+    if (options?.address !== undefined || options?.fingerprint !== undefined) {
+      this.handshake = {
+        address: options.address,
+        auth: options.fingerprint !== undefined ? { clientFingerprint: options.fingerprint } : undefined,
+      };
+    }
   }
 
   on(event: string, handler: EventHandler): void {
@@ -169,6 +184,7 @@ function setupSocketHarness(overrides?: {
 
   return {
     io,
+    state,
     hooks: {
       getStateSnapshot: () => getPhase0StateSnapshot(state),
       getParticipantRecord: (roomId: string, participantId: string) =>
@@ -2067,6 +2083,140 @@ test("T3.2-04 (P3-NK-004): nickname update broadcasts to all room participants i
   assert.equal(guest2Record?.nickname, "Carol", "Guest2 nickname must remain unchanged");
 });
 
+// ---- T3.1 Security & Housekeeping (additions) ----
+
+test("T3.1-09 (P3-SH-009): resume_session returns ROOM_NOT_FOUND when participant token is valid but participant has not disconnected", async () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("socket-host");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as {
+    roomId: string;
+    reconnectToken: string;
+  };
+  assert.ok(roomCreated);
+
+  // Host is still connected — do not trigger disconnect.
+  // A second socket attempts to resume using the valid, unexpired token.
+  const intruder = io.connect("socket-intruder");
+  intruder.trigger(CLIENT_EVENTS.resumeSession, {
+    roomId: roomCreated.roomId,
+    reconnectToken: roomCreated.reconnectToken,
+  });
+  await flushPromises();
+
+  assert.equal(
+    intruder.popEvent(SERVER_EVENTS.roomJoined),
+    undefined,
+    "Resume must be rejected when participant has not disconnected"
+  );
+  const resumeError = popSocketError(intruder);
+  assert.ok(resumeError, "Error must be emitted for a non-disconnected token");
+  assert.equal(resumeError.code, "ROOM_NOT_FOUND", "Active-session resume attempt must return ROOM_NOT_FOUND");
+});
+
+test("T3.1-10 (P3-SH-010): room_password_update by a non-host guest returns ROOM_NOT_FOUND and leaves password unchanged", async () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest = io.connect("socket-guest");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "original-pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "original-pw", nickname: "Guest" });
+  guest.popEvent(SERVER_EVENTS.roomJoined);
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  // Guest attempts to change the password — must be rejected
+  guest.trigger(CLIENT_EVENTS.roomPasswordUpdate, { roomId: roomCreated.roomId, newPassword: "hacked-pw" });
+  await flushPromises();
+
+  const guestError = popSocketError(guest);
+  assert.ok(guestError, "Non-host must receive an error for password update attempt");
+  assert.equal(guestError.code, "ROOM_NOT_FOUND", "Non-host password update must return ROOM_NOT_FOUND");
+
+  // No broadcast must have been emitted
+  assert.equal(host.popEvent(SERVER_EVENTS.roomPasswordUpdated), undefined, "No room_password_updated must be broadcast for a non-host attempt");
+  assert.equal(guest.popEvent(SERVER_EVENTS.roomPasswordUpdated), undefined);
+
+  // Password must be unchanged — a new guest should still join with the original password
+  const guest2 = io.connect("socket-guest-2");
+  guest2.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "original-pw", nickname: "Guest2" });
+  const guest2Joined = guest2.popEvent(SERVER_EVENTS.roomJoined);
+  assert.ok(guest2Joined, "Original password must still be valid after rejected non-host update");
+  assert.equal(popSocketError(guest2), undefined);
+});
+
+test("T3.1-11 (P3-SH-011): resume_session with null, undefined, empty, or whitespace-only reconnectToken returns ROOM_NOT_FOUND", async () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("socket-host");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  const malformedTokens: Array<{ label: string; value: unknown }> = [
+    { label: "null", value: null },
+    { label: "undefined", value: undefined },
+    { label: "empty string", value: "" },
+    { label: "whitespace-only", value: "   " },
+  ];
+
+  for (const { label, value } of malformedTokens) {
+    const resumeSocket = io.connect(`socket-resume-${label.replace(/\s/g, "-")}`);
+    resumeSocket.trigger(CLIENT_EVENTS.resumeSession, {
+      roomId: roomCreated.roomId,
+      reconnectToken: value,
+    });
+    await flushPromises();
+
+    assert.equal(
+      resumeSocket.popEvent(SERVER_EVENTS.roomJoined),
+      undefined,
+      `Resume must be rejected for malformed token: ${label}`
+    );
+    const resumeError = popSocketError(resumeSocket);
+    assert.ok(resumeError, `Error must be emitted for malformed token: ${label}`);
+    assert.equal(resumeError.code, "ROOM_NOT_FOUND", `Malformed token (${label}) must return ROOM_NOT_FOUND`);
+  }
+});
+
+test("T3.1-12 (P3-SH-012): sweeper prunes orphaned participantToRoom and socketToParticipant entries with no matching room or participant", () => {
+  const originalSetInterval = globalThis.setInterval;
+  let capturedSweep: (() => void) | null = null;
+
+  (globalThis as unknown as { setInterval: (cb: () => void) => NodeJS.Timeout }).setInterval =
+    (callback: () => void): NodeJS.Timeout => {
+      capturedSweep = callback;
+      return { unref: () => undefined } as unknown as NodeJS.Timeout;
+    };
+
+  try {
+    const { state, hooks } = setupSocketHarness();
+    assert.ok(capturedSweep, "Sweeper must be registered via setInterval");
+
+    // Inject a stale participantToRoom entry pointing to a non-existent room
+    state.participantToRoom.set("orphan-participant-1", "ghost-room");
+    // Inject a stale socketToParticipant entry whose participant has no participantToRoom entry
+    state.socketToParticipant.set("orphan-socket-1", "orphan-participant-2");
+
+    const snapshotBefore = hooks.getStateSnapshot();
+    assert.equal(snapshotBefore.participantToRoomCount, 1, "Stale participantToRoom entry must be visible before sweep");
+    assert.equal(snapshotBefore.socketToParticipantCount, 1, "Stale socketToParticipant entry must be visible before sweep");
+
+    (capturedSweep as () => void)();
+
+    const snapshotAfter = hooks.getStateSnapshot();
+    assert.equal(snapshotAfter.participantToRoomCount, 0, "Sweeper must prune the orphaned participantToRoom entry");
+    assert.equal(snapshotAfter.socketToParticipantCount, 0, "Sweeper must prune the orphaned socketToParticipant entry");
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+  }
+});
+
+// ---- T3.2 User Identity & UX (additions) ----
+
 test("T3.2-06 (P3-NK-006): nicknameUpdate rejects missing and blank nicknames with INVALID_SIGNAL_PAYLOAD", async () => {
   const { io, hooks } = setupSocketHarness();
   const host = io.connect("socket-host");
@@ -2107,4 +2257,297 @@ test("T3.2-06 (P3-NK-006): nicknameUpdate rejects missing and blank nicknames wi
   const snapshot = hooks.getStateSnapshot();
   assert.equal(snapshot.roomCount, 1);
   assert.equal(snapshot.rooms[0]?.participantCount, 2);
+});
+
+test("T3.2-07 (P3-NK-007): guest nickname is freed from nicknameToParticipant when grace timer fires, allowing a new participant to join with the same nickname", () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+
+  const scheduledTimeouts: Array<{
+    handle: { cleared: boolean; unref?: () => void };
+    delay: number;
+    callback: () => void;
+  }> = [];
+
+  globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number) => {
+    const handle: { cleared: boolean; unref?: () => void } = {
+      cleared: false,
+      unref: () => undefined
+    };
+    scheduledTimeouts.push({ handle, delay: Number(delay ?? 0), callback: () => callback() });
+    return handle as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+
+  globalThis.clearTimeout = ((handle: ReturnType<typeof setTimeout>) => {
+    const h = handle as unknown as { cleared?: boolean };
+    if (h) { h.cleared = true; }
+  }) as typeof clearTimeout;
+
+  try {
+    const { io, hooks } = setupSocketHarness();
+    const host = io.connect("socket-host");
+    const guest = io.connect("socket-guest");
+
+    host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+    const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+    assert.ok(roomCreated);
+
+    guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Alice" });
+    guest.popEvent(SERVER_EVENTS.roomJoined);
+    host.popEvent(SERVER_EVENTS.peerJoined);
+
+    // Guest disconnects — grace timer is scheduled
+    guest.triggerDisconnect();
+
+    const graceTimer = scheduledTimeouts.find(
+      (entry) => entry.delay === GUEST_DISCONNECT_GRACE_MS && !entry.handle.cleared
+    );
+    assert.ok(graceTimer, "Guest grace timer must be scheduled on guest disconnect");
+
+    // Fire the grace timer — participant is removed, nickname must be freed
+    graceTimer.callback();
+
+    const snapshotAfterGrace = hooks.getStateSnapshot();
+    assert.equal(snapshotAfterGrace.rooms[0]?.participantCount, 1, "Room must have only the host after grace expiry");
+
+    // A new participant with the same nickname 'Alice' must now be allowed to join
+    const newGuest = io.connect("socket-new-guest");
+    newGuest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Alice" });
+    const newGuestJoined = newGuest.popEvent(SERVER_EVENTS.roomJoined);
+    assert.ok(newGuestJoined, "A new participant must be allowed to join with the nickname freed by grace expiry");
+    assert.equal(popSocketError(newGuest), undefined, "No error must be emitted for a nickname that was freed on grace expiry");
+
+    const finalSnapshot = hooks.getStateSnapshot();
+    assert.equal(finalSnapshot.rooms[0]?.participantCount, 2, "Room must have host and new guest after successful rejoin");
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
+test("T3.2-08 (P3-NK-008): nickname length boundaries — 2-char rejected, 3-char accepted, 24-char accepted, 25-char rejected", () => {
+  let roomCounter = 0;
+  const { io, hooks } = setupSocketHarness({
+    generateRoomId: () => {
+      roomCounter += 1;
+      return `ROOM-LEN-${roomCounter}`;
+    }
+  });
+
+  // 2-char nickname: must be rejected (below minimum of 3)
+  const socket2 = io.connect("socket-2char");
+  socket2.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Ab" });
+  const twoCharError = popSocketError(socket2);
+  assert.ok(twoCharError, "2-char nickname must be rejected");
+  assert.equal(twoCharError.code, "INVALID_SIGNAL_PAYLOAD", "2-char nickname must return INVALID_SIGNAL_PAYLOAD");
+  assert.equal(socket2.popEvent(SERVER_EVENTS.roomCreated), undefined, "No room must be created for 2-char nickname");
+
+  let snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.roomCount, 0);
+
+  // 3-char nickname: must be accepted (at minimum boundary)
+  const socket3 = io.connect("socket-3char");
+  socket3.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Abc" });
+  const threeCharCreated = socket3.popEvent(SERVER_EVENTS.roomCreated);
+  assert.ok(threeCharCreated, "3-char nickname must be accepted (at minimum boundary)");
+  assert.equal(popSocketError(socket3), undefined);
+
+  snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.roomCount, 1);
+
+  // 24-char nickname: must be accepted (at maximum boundary)
+  const socket24 = io.connect("socket-24char");
+  socket24.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "A".repeat(24) });
+  const twentyFourCharCreated = socket24.popEvent(SERVER_EVENTS.roomCreated);
+  assert.ok(twentyFourCharCreated, "24-char nickname must be accepted (at maximum boundary)");
+  assert.equal(popSocketError(socket24), undefined);
+
+  snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.roomCount, 2);
+
+  // 25-char nickname: must be rejected (above maximum of 24)
+  const socket25 = io.connect("socket-25char");
+  socket25.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "A".repeat(25) });
+  const twentyFiveCharError = popSocketError(socket25);
+  assert.ok(twentyFiveCharError, "25-char nickname must be rejected");
+  assert.equal(twentyFiveCharError.code, "INVALID_SIGNAL_PAYLOAD", "25-char nickname must return INVALID_SIGNAL_PAYLOAD");
+  assert.equal(socket25.popEvent(SERVER_EVENTS.roomCreated), undefined, "No room must be created for 25-char nickname");
+
+  snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.roomCount, 2, "Room count must remain at 2 after rejected 25-char nickname");
+});
+
+test("T3.2-09 (P3-NK-009): nicknames with disallowed characters are rejected with INVALID_SIGNAL_PAYLOAD", () => {
+  const { io, hooks } = setupSocketHarness();
+  const host = io.connect("socket-host-char");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "ValidHost" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  const disallowedNicknames: Array<{ nickname: string; label: string }> = [
+    { nickname: "Host@123", label: "@ character" },
+    { nickname: "Bob#Tag",  label: "# character" },
+    { nickname: "Alice!",   label: "! character" },
+    { nickname: "Name X", label: "null control character (\\u0000)" },
+    { nickname: "A​Name", label: "zero-width space (\\u200B, category Cf)" },
+    { nickname: "Cool😀", label: "emoji (not in [\\p{L}\\p{N} _-])" },
+  ];
+
+  for (let i = 0; i < disallowedNicknames.length; i += 1) {
+    const { nickname, label } = disallowedNicknames[i]!;
+    const socket = io.connect(`socket-disallowed-${i}`);
+    socket.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname });
+    const errorPayload = popSocketError(socket);
+    assert.ok(errorPayload, `Nickname with ${label} must be rejected`);
+    assert.equal(
+      errorPayload.code,
+      "INVALID_SIGNAL_PAYLOAD",
+      `Nickname with ${label} must return INVALID_SIGNAL_PAYLOAD`
+    );
+    assert.equal(
+      host.popEvent(SERVER_EVENTS.peerJoined),
+      undefined,
+      `No peer_joined must be emitted for disallowed nickname (${label})`
+    );
+  }
+
+  const snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.rooms[0]?.participantCount, 1, "Room must still have only the host after all rejected joins");
+});
+
+// ---- T3.3 Ops, Abuse Controls & Tests (additions) ----
+
+test("T3.3-06 (P3-AB-006): IP-level create rate limit blocks requests after IP_CREATE_THRESHOLD within the abuse window", () => {
+  // IP_CREATE_THRESHOLD = 10: 10 creates from the same IP are allowed; the 11th is blocked.
+  // Each socket uses a unique fingerprint so the per-subject burst window (threshold 5) never fires.
+  const IP_CREATE_THRESHOLD = 10;
+  let roomCounter = 0;
+  const { io, hooks } = setupSocketHarness({
+    generateRoomId: () => {
+      roomCounter += 1;
+      return `IP-ROOM-${roomCounter}`;
+    }
+  });
+
+  for (let attempt = 1; attempt <= IP_CREATE_THRESHOLD; attempt += 1) {
+    const socket = io.connect(`socket-ip-create-${attempt}`, {
+      address: "192.0.2.1",
+      fingerprint: `fp-${attempt}`
+    });
+    socket.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: `Host-${attempt}` });
+    const created = socket.popEvent(SERVER_EVENTS.roomCreated);
+    assert.ok(created, `Attempt ${attempt}: must succeed before IP threshold`);
+    assert.equal(popSocketError(socket), undefined, `Attempt ${attempt}: must not return error below threshold`);
+  }
+
+  // 11th attempt from the same IP exceeds IP_CREATE_THRESHOLD → RATE_LIMITED
+  const blockedSocket = io.connect("socket-ip-create-blocked", {
+    address: "192.0.2.1",
+    fingerprint: "fp-blocked"
+  });
+  blockedSocket.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Blocked" });
+  const blockedError = popSocketError(blockedSocket);
+  assert.ok(blockedError, "11th create from same IP must be blocked");
+  assert.equal(blockedError.code, "RATE_LIMITED", "IP threshold breach must return RATE_LIMITED");
+  assert.equal(blockedSocket.popEvent(SERVER_EVENTS.roomCreated), undefined, "No room must be created on IP-blocked attempt");
+
+  const snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.roomCount, IP_CREATE_THRESHOLD, "Only the first 10 rooms must have been created");
+});
+
+test("T3.3-07 (P3-AB-007): join-attempt cooldown state is purged when a room is destroyed so a recycled room ID does not inherit a stale cooldown", () => {
+  // Both creations use the same room ID so the stale joinAttemptByRoomSubject key is observable.
+  const roomIdFactory = createSequenceFactory(["LOCK-RECYCLE", "LOCK-RECYCLE"], "LOCK-X");
+  let timeNow = 1000;
+  const { io, hooks } = setupSocketHarness({
+    generateRoomId: roomIdFactory,
+    now: () => timeNow
+  });
+
+  // Create the first room and accumulate invalid join attempts to set an active cooldown.
+  const hostA = io.connect("socket-host-a");
+  hostA.trigger(CLIENT_EVENTS.createRoom, { password: "correct-pw", nickname: "HostA" });
+  const createdA = hostA.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.equal(createdA.roomId, "LOCK-RECYCLE");
+
+  // Attempts 1 – NO_COOLDOWN_MAX: each gets INVALID_PASSWORD
+  for (let attempt = 1; attempt <= JOIN_INVALID_ATTEMPT_NO_COOLDOWN_MAX; attempt += 1) {
+    const g = io.connect(`socket-wrong-${attempt}`);
+    g.trigger(CLIENT_EVENTS.joinRoom, { roomId: "LOCK-RECYCLE", password: "wrong-pw", nickname: `Wrong-${attempt}` });
+    assert.equal(popSocketError(g)?.code, "INVALID_PASSWORD", `Attempt ${attempt}: expected INVALID_PASSWORD`);
+  }
+
+  // Next attempt: cooldown is set → RATE_LIMITED
+  const gCooldown = io.connect("socket-wrong-cooldown");
+  gCooldown.trigger(CLIENT_EVENTS.joinRoom, { roomId: "LOCK-RECYCLE", password: "wrong-pw", nickname: "WrongC" });
+  assert.equal(popSocketError(gCooldown)?.code, "RATE_LIMITED", "Expected RATE_LIMITED once cooldown kicks in");
+
+  // Verify cooldown is active — correct password is still blocked within the cooldown window
+  const gBlocked = io.connect("socket-blocked-correct");
+  gBlocked.trigger(CLIENT_EVENTS.joinRoom, { roomId: "LOCK-RECYCLE", password: "correct-pw", nickname: "BlockedCorrect" });
+  assert.equal(popSocketError(gBlocked)?.code, "RATE_LIMITED", "Correct-password join during active cooldown must still be blocked");
+
+  // Destroy the first room — purgeJoinAttemptsForRoom must clear the stale lock
+  hostA.trigger(CLIENT_EVENTS.leaveRoom, {});
+  assert.equal(hooks.getStateSnapshot().roomCount, 0, "First room must be destroyed");
+
+  // Create a second room with the same ID
+  const hostB = io.connect("socket-host-b");
+  hostB.trigger(CLIENT_EVENTS.createRoom, { password: "new-pw", nickname: "HostB" });
+  const createdB = hostB.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.equal(createdB.roomId, "LOCK-RECYCLE", "Second room must reuse the same room ID");
+
+  // The same subject (all fake sockets share one subject) must be able to join with the correct password
+  const freshGuest = io.connect("socket-fresh-guest");
+  freshGuest.trigger(CLIENT_EVENTS.joinRoom, { roomId: "LOCK-RECYCLE", password: "new-pw", nickname: "FreshGuest" });
+  const freshJoined = freshGuest.popEvent(SERVER_EVENTS.roomJoined);
+  assert.ok(freshJoined, "Guest must be able to join the recycled room — stale cooldown state must have been purged");
+  assert.equal(popSocketError(freshGuest), undefined, "No error must be emitted after cooldown state is purged");
+});
+
+test("T3.3-08 (P3-AB-008): join-attempt cooldown resets after expiry and the next correct-password attempt succeeds", () => {
+  let timeNow = 1000;
+  const { io } = setupSocketHarness({ now: () => timeNow });
+  const host = io.connect("socket-host");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "correct-pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  // Attempts 1 – NO_COOLDOWN_MAX: each gets INVALID_PASSWORD (no cooldown yet)
+  for (let attempt = 1; attempt <= JOIN_INVALID_ATTEMPT_NO_COOLDOWN_MAX; attempt += 1) {
+    const socket = io.connect(`socket-wrong-${attempt}`);
+    socket.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "wrong-pw", nickname: `Guest-${attempt}` });
+    const err = popSocketError(socket);
+    assert.ok(err, `Attempt ${attempt}: expected error`);
+    assert.equal(err.code, "INVALID_PASSWORD", `Attempt ${attempt}: expected INVALID_PASSWORD before cooldown`);
+  }
+
+  // Next wrong-password attempt: cooldown is set → RATE_LIMITED
+  const socketCooldown = io.connect("socket-wrong-cooldown");
+  socketCooldown.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "wrong-pw", nickname: "GuestC" });
+  const cooldownError = popSocketError(socketCooldown);
+  assert.ok(cooldownError, "Expected RATE_LIMITED once cooldown is set");
+  assert.equal(cooldownError.code, "RATE_LIMITED", "Cooldown must be set after exceeding NO_COOLDOWN_MAX invalid attempts");
+
+  // Correct-password attempt during active cooldown must still be blocked
+  const socketDuringCooldown = io.connect("socket-during-cooldown");
+  socketDuringCooldown.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "correct-pw", nickname: "GuestDuring" });
+  const duringCooldownError = popSocketError(socketDuringCooldown);
+  assert.ok(duringCooldownError, "Attempt during active cooldown must be RATE_LIMITED");
+  assert.equal(duringCooldownError.code, "RATE_LIMITED", "Active cooldown must block even a correct-password attempt");
+  assert.equal(socketDuringCooldown.popEvent(SERVER_EVENTS.roomJoined), undefined, "No room_joined during active cooldown");
+
+  // Advance clock past the cooldown deadline
+  timeNow += JOIN_INVALID_ATTEMPT_COOLDOWN_MS + 1;
+
+  // Correct-password attempt after cooldown expiry — the cooldown-reset path must clear cooldownUntil
+  const socketAfterCooldown = io.connect("socket-after-cooldown");
+  socketAfterCooldown.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "correct-pw", nickname: "GuestAfter" });
+  const roomJoined = socketAfterCooldown.popEvent(SERVER_EVENTS.roomJoined);
+  assert.ok(roomJoined, "Join with correct password after cooldown expiry must succeed");
+  assert.equal(popSocketError(socketAfterCooldown), undefined, "No error must be emitted after cooldown resets");
+
+  host.popEvent(SERVER_EVENTS.peerJoined);
 });

@@ -607,6 +607,14 @@ export function registerSocketHandlers({
         return;
       }
 
+      const leavingRecord = activeRoom.participants.get(participantId);
+      if (leavingRecord?.nickname && activeRoom.nicknameToParticipant) {
+        const key = leavingRecord.nickname.toLowerCase();
+        if (activeRoom.nicknameToParticipant.get(key) === participantId) {
+          activeRoom.nicknameToParticipant.delete(key);
+        }
+      }
+
       activeRoom.participants.delete(participantId);
       state.participantToRoom.delete(participantId);
       clearReconnectForParticipant(participantId);
