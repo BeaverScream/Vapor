@@ -6,6 +6,8 @@ import type {
   CreateRoomPayload,
   HostReconnectGracePayload,
   JoinRoomPayload,
+  KickParticipantPayload,
+  ParticipantKickedPayload,
   PeerJoinedPayload,
   PeerLeftPayload,
   ResumeSessionPayload,
@@ -159,6 +161,10 @@ function emitRateLimited(socket: Socket): void {
 
 function emitInvalidSignalPayload(socket: Socket): void {
   emitSocketError(socket, signaling.ERROR_CODES.invalidSignalPayload);
+}
+
+function emitNotAuthorized(socket: Socket): void {
+  emitSocketError(socket, signaling.ERROR_CODES.notAuthorized);
 }
 
 function deriveJoinAttemptSubject(socket: Socket): string {
@@ -735,6 +741,12 @@ export function registerSocketHandlers({
       signaling.CLIENT_EVENTS.createRoom,
       (payload: CreateRoomPayload | undefined) => {
         const normalizedPassword = normalizePassword(payload?.password);
+
+        if (typeof payload?.password === 'string' && payload.password !== '' && payload.password.trim() === '') {
+          emitInvalidPassword(socket);
+          return;
+        }
+
         const normalizedNickname = normalizeNickname(payload?.nickname);
         const subject = deriveJoinAttemptSubject(socket);
 
@@ -742,10 +754,6 @@ export function registerSocketHandlers({
         const blockedUntil = temporaryBlocklistBySubject.get(subject);
         if (blockedUntil && now() < blockedUntil) {
           emitRateLimited(socket);
-          return;
-        }
-        if (!normalizedPassword) {
-          emitInvalidPassword(socket);
           return;
         }
 
@@ -796,12 +804,20 @@ export function registerSocketHandlers({
           room.nicknameToParticipant.set(normalizedNickname.toLowerCase(), participantId);
         }
 
-        const salt = randomBytes(16).toString("hex");
-        roomAuthById.set(room.roomId, {
-          salt,
-          passwordHash: hashPassword(normalizedPassword, salt),
-          passwordVersion: 1,
-        });
+        if (normalizedPassword) {
+          const salt = randomBytes(16).toString("hex");
+          roomAuthById.set(room.roomId, {
+            salt,
+            passwordHash: hashPassword(normalizedPassword, salt),
+            passwordVersion: 1,
+          });
+        } else {
+          roomAuthById.set(room.roomId, {
+            salt: "",
+            passwordHash: "",
+            passwordVersion: 1,
+          });
+        }
 
         const reconnectToken = upsertReconnectToken(
           room.roomId,
@@ -825,6 +841,7 @@ export function registerSocketHandlers({
           expiresAt: policy.expiresAt,
           soloHostDeadlineAt: policy.soloHostDeadlineAt,
           participantCount: room.participants.size,
+          hasPassword: !!normalizedPassword,
         };
 
         socket.emit(signaling.SERVER_EVENTS.roomCreated, response);
@@ -847,7 +864,8 @@ export function registerSocketHandlers({
         }
 
         const normalizedPassword = normalizePassword(payload?.password);
-        if (!normalizedPassword) {
+
+        if (typeof payload?.password === 'string' && payload.password !== '' && payload.password.trim() === '') {
           emitInvalidPassword(socket);
           return;
         }
@@ -904,32 +922,40 @@ export function registerSocketHandlers({
         }
 
         const auth = roomAuthById.get(roomId);
-        if (!auth || !verifyPassword(normalizedPassword, auth)) {
-          const nextInvalidCount = (joinAttempt?.invalidCount ?? 0) + 1;
-          const nextJoinAttempt: JoinAttemptRecord = {
-            invalidCount: nextInvalidCount,
-            strictLocked: false,
-            lastAttemptAt: attemptTimestamp,
-          };
+        if (!auth) {
+          emitRoomNotFound(socket);
+          return;
+        }
 
-          joinAttemptByRoomSubject.set(joinAttemptKey, nextJoinAttempt);
+        const isOpenRoom = !auth.passwordHash;
+        if (!isOpenRoom) {
+          if (!normalizedPassword || !verifyPassword(normalizedPassword, auth)) {
+            const nextInvalidCount = (joinAttempt?.invalidCount ?? 0) + 1;
+            const nextJoinAttempt: JoinAttemptRecord = {
+              invalidCount: nextInvalidCount,
+              strictLocked: false,
+              lastAttemptAt: attemptTimestamp,
+            };
 
-          if (nextInvalidCount <= signaling.JOIN_INVALID_ATTEMPT_NO_COOLDOWN_MAX) {
-            emitInvalidPassword(socket);
-            return;
-          }
+            joinAttemptByRoomSubject.set(joinAttemptKey, nextJoinAttempt);
 
-          if (nextInvalidCount <= signaling.JOIN_INVALID_ATTEMPT_COOLDOWN_MAX) {
-            nextJoinAttempt.cooldownUntil =
-              attemptTimestamp + signaling.JOIN_INVALID_ATTEMPT_COOLDOWN_MS;
+            if (nextInvalidCount <= signaling.JOIN_INVALID_ATTEMPT_NO_COOLDOWN_MAX) {
+              emitInvalidPassword(socket);
+              return;
+            }
+
+            if (nextInvalidCount <= signaling.JOIN_INVALID_ATTEMPT_COOLDOWN_MAX) {
+              nextJoinAttempt.cooldownUntil =
+                attemptTimestamp + signaling.JOIN_INVALID_ATTEMPT_COOLDOWN_MS;
+              emitRateLimited(socket);
+              return;
+            }
+
+            nextJoinAttempt.strictLocked = true;
+            nextJoinAttempt.cooldownUntil = undefined;
             emitRateLimited(socket);
             return;
           }
-
-          nextJoinAttempt.strictLocked = true;
-          nextJoinAttempt.cooldownUntil = undefined;
-          emitRateLimited(socket);
-          return;
         }
 
         joinAttemptByRoomSubject.delete(joinAttemptKey);
@@ -988,12 +1014,14 @@ export function registerSocketHandlers({
           expiresAt: policy?.expiresAt ?? room.createdAt + signaling.ROOM_MAX_DURATION_MS,
           participantNickname: normalizedNickname,
           participantCount: joined.room.participants.size,
+          hasPassword: !isOpenRoom,
         };
 
         socket.emit(signaling.SERVER_EVENTS.roomJoined, roomJoinedPayload);
 
         const peerJoinedPayload: PeerJoinedPayload = {
           participantId: joined.participantId,
+          nickname: normalizedNickname,
           participantCount: joined.room.participants.size,
         };
 
@@ -1151,7 +1179,7 @@ export function registerSocketHandlers({
             .filter(
               (peer) => peer.participantId !== reconnectRecord.participantId,
             )
-            .map((peer) => ({ participantId: peer.participantId }));
+            .map((peer) => ({ participantId: peer.participantId, nickname: peer.nickname ?? null }));
 
           const policy = roomPolicyById.get(roomId);
           const roomJoinedPayload: RoomJoinedPayload = {
@@ -1163,6 +1191,7 @@ export function registerSocketHandlers({
             expiresAt: policy?.expiresAt ?? room.createdAt + signaling.ROOM_MAX_DURATION_MS,
             participantNickname: participant.nickname ?? null,
             participantCount: room.participants.size,
+            hasPassword: !!auth.passwordHash,
           };
 
           socket.emit(signaling.SERVER_EVENTS.roomJoined, roomJoinedPayload);
@@ -1204,6 +1233,11 @@ export function registerSocketHandlers({
           const auth = roomAuthById.get(roomId);
           if (!auth) {
             emitRoomNotFound(socket);
+            return;
+          }
+
+          if (!auth.passwordHash) {
+            emitNotAuthorized(socket);
             return;
           }
 
@@ -1287,6 +1321,85 @@ export function registerSocketHandlers({
 
           io.to(roomId).emit(signaling.SERVER_EVENTS.nicknameUpdated, updatePayload);
         });
+      },
+    );
+
+    socket.on(
+      signaling.CLIENT_EVENTS.kickParticipant,
+      (payload: KickParticipantPayload | undefined) => {
+        const roomId = payload?.roomId;
+        const targetParticipantId = payload?.targetParticipantId;
+
+        if (
+          !roomId ||
+          typeof targetParticipantId !== "string" ||
+          targetParticipantId.trim().length === 0
+        ) {
+          emitInvalidSignalPayload(socket);
+          return;
+        }
+
+        const callerParticipantId = state.socketToParticipant.get(socket.id);
+        if (!callerParticipantId) {
+          emitRoomNotFound(socket);
+          return;
+        }
+
+        const callerRoomId = state.participantToRoom.get(callerParticipantId);
+        if (callerRoomId !== roomId) {
+          emitRoomNotFound(socket);
+          return;
+        }
+
+        const room = state.rooms.get(roomId);
+        if (!room) {
+          emitRoomNotFound(socket);
+          return;
+        }
+
+        if (room.hostId !== callerParticipantId) {
+          emitNotAuthorized(socket);
+          return;
+        }
+
+        if (targetParticipantId === callerParticipantId) {
+          emitInvalidSignalPayload(socket);
+          return;
+        }
+
+        const targetParticipant = room.participants.get(targetParticipantId);
+        if (!targetParticipant) {
+          emitRoomNotFound(socket);
+          return;
+        }
+
+        const targetSocketId = targetParticipant.socketId;
+
+        const kickedPayload: ParticipantKickedPayload = { participantId: targetParticipantId };
+        io.to(roomId).emit(signaling.SERVER_EVENTS.participantKicked, kickedPayload);
+
+        if (targetParticipant.nickname) {
+          const key = targetParticipant.nickname.toLowerCase();
+          if (room.nicknameToParticipant.get(key) === targetParticipantId) {
+            room.nicknameToParticipant.delete(key);
+          }
+        }
+
+        room.participants.delete(targetParticipantId);
+        state.participantToRoom.delete(targetParticipantId);
+
+        if (!targetSocketId.startsWith("disconnected:")) {
+          state.socketToParticipant.delete(targetSocketId);
+        }
+
+        clearReconnectForParticipant(targetParticipantId);
+
+        if (!targetSocketId.startsWith("disconnected:")) {
+          const ioServer = io as unknown as {
+            sockets: { sockets: Map<string, { disconnect: (close?: boolean) => void }> };
+          };
+          ioServer.sockets?.sockets?.get(targetSocketId)?.disconnect(true);
+        }
       },
     );
 

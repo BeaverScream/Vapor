@@ -22,7 +22,7 @@ Vapor enforces a maximum 2-hour TTL, but rooms can end earlier by lifecycle poli
 - host-only room times out before any guest joins (`solo_timeout_expired`),
 - or full TTL is reached (`room_ttl_expired`).
 
-**What happens after repeated wrong password attempts?**  
+**What happens after repeated wrong password attempts? (THIS OUTDATED)**  
 Join-attempt policy is enforced per room + subject key:
 - attempts 1-3: rejected as `INVALID_PASSWORD` with no cooldown,
 - attempts 4-5: 10-minute cooldown (attempts during cooldown return `RATE_LIMITED`),

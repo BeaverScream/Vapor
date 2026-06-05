@@ -86,14 +86,18 @@ function App() {
           participantNicknames={state.participantNicknames}
           roomStatus={derived.roomStatus}
           chatStatusText={derived.chatStatusText}
-          soloWaitingChipText={derived.soloWaitingChipText}
-          roomLifetimeText={derived.roomLifetimeText}
+          soloHostDeadlineAt={derived.soloHostDeadlineAt}
+          expiresAt={derived.expiresAt}
+          hasPassword={state.hasPassword}
           copyFeedback={state.copyFeedback}
           chatMessages={state.chatMessages}
           chatDraft={state.chatDraft}
+          typingPeerIds={state.typingPeerIds}
           onCopyRoomId={actions.copyRoomId}
           onSendChatMessage={actions.sendChatMessage}
+          onNotifyTypingStart={actions.notifyTypingStart}
           onLeaveRoom={actions.leaveRoom}
+          onKickParticipant={actions.kickParticipant}
         />
       ) : null}
 

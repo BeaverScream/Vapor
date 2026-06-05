@@ -16,17 +16,19 @@ type SignalingEmitter = {
   emitSignalIce: (payload: SignalIceRequest) => void
 }
 
+export type WebRtcTelemetryEvent =
+  | { kind: 'peer_connection_state'; peerId: string; state: string; timestampMs: number }
+  | { kind: 'data_channel_state'; peerId: string; state: string; timestampMs: number }
+  | { kind: 'bitrate_stats'; peerId: string; bytesReceived: number; bytesSent: number; timestampMs: number }
+
 type VaporWebRtcChatMeshArgs = {
   roomId: string
   participantId: string
   signalingEmitter: SignalingEmitter
   onRemoteMessage: (fromParticipantId: string, text: string) => void
+  onRemoteTypingStatus: (fromParticipantId: string, isTyping: boolean) => void
   onConnectedPeerCountChange: (count: number) => void
-  onTelemetryEvent?: (event: {
-    kind: 'peer_connection_state' | 'data_channel_state'
-    state: string
-    timestampMs: number
-  }) => void
+  onTelemetryEvent?: (event: WebRtcTelemetryEvent) => void
 }
 
 export class VaporWebRtcChatMesh {
@@ -34,17 +36,20 @@ export class VaporWebRtcChatMesh {
   private readonly participantId: string
   private readonly signalingEmitter: SignalingEmitter
   private readonly onRemoteMessage: (fromParticipantId: string, text: string) => void
+  private readonly onRemoteTypingStatus: (fromParticipantId: string, isTyping: boolean) => void
   private readonly onConnectedPeerCountChange: (count: number) => void
   private readonly onTelemetryEvent: NonNullable<VaporWebRtcChatMeshArgs['onTelemetryEvent']>
   private readonly peerConnections = new Map<string, RTCPeerConnection>()
   private readonly dataChannels = new Map<string, RTCDataChannel>()
   private disposed = false
+  private statsIntervalHandle: ReturnType<typeof window.setInterval> | null = null
 
   constructor({
     roomId,
     participantId,
     signalingEmitter,
     onRemoteMessage,
+    onRemoteTypingStatus,
     onConnectedPeerCountChange,
     onTelemetryEvent,
   }: VaporWebRtcChatMeshArgs) {
@@ -52,6 +57,7 @@ export class VaporWebRtcChatMesh {
     this.participantId = participantId
     this.signalingEmitter = signalingEmitter
     this.onRemoteMessage = onRemoteMessage
+    this.onRemoteTypingStatus = onRemoteTypingStatus
     this.onConnectedPeerCountChange = onConnectedPeerCountChange
     this.onTelemetryEvent = onTelemetryEvent ?? (() => undefined)
   }
@@ -182,12 +188,23 @@ export class VaporWebRtcChatMesh {
     return deliveredCount
   }
 
+  sendTypingStart(): void {
+    if (this.disposed) return
+    this.broadcastControl('{"type":"typing_start"}')
+  }
+
+  sendTypingStop(): void {
+    if (this.disposed) return
+    this.broadcastControl('{"type":"typing_stop"}')
+  }
+
   dispose(): void {
     if (this.disposed) {
       return
     }
 
     this.disposed = true
+    this.stopStatsPolling()
 
     for (const peerId of Array.from(this.peerConnections.keys())) {
       this.removePeer(peerId)
@@ -229,6 +246,7 @@ export class VaporWebRtcChatMesh {
     connection.onconnectionstatechange = () => {
       this.onTelemetryEvent({
         kind: 'peer_connection_state',
+        peerId,
         state: connection.connectionState,
         timestampMs: Date.now(),
       })
@@ -248,12 +266,30 @@ export class VaporWebRtcChatMesh {
     this.dataChannels.set(peerId, channel)
 
     channel.onmessage = (event) => {
-      this.onRemoteMessage(peerId, this.asTextMessage(event.data))
+      const raw = this.asTextMessage(event.data)
+      try {
+        const parsed = JSON.parse(raw) as unknown
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const { type } = parsed as Record<string, unknown>
+          if (type === 'typing_start') {
+            this.onRemoteTypingStatus(peerId, true)
+            return
+          }
+          if (type === 'typing_stop') {
+            this.onRemoteTypingStatus(peerId, false)
+            return
+          }
+        }
+      } catch {
+        // not JSON — treat as chat message
+      }
+      this.onRemoteMessage(peerId, raw)
     }
 
     channel.onopen = () => {
       this.onTelemetryEvent({
         kind: 'data_channel_state',
+        peerId,
         state: channel.readyState,
         timestampMs: Date.now(),
       })
@@ -263,6 +299,7 @@ export class VaporWebRtcChatMesh {
     channel.onclose = () => {
       this.onTelemetryEvent({
         kind: 'data_channel_state',
+        peerId,
         state: channel.readyState,
         timestampMs: Date.now(),
       })
@@ -272,6 +309,7 @@ export class VaporWebRtcChatMesh {
     channel.onerror = () => {
       this.onTelemetryEvent({
         kind: 'data_channel_state',
+        peerId,
         state: 'error',
         timestampMs: Date.now(),
       })
@@ -322,7 +360,16 @@ export class VaporWebRtcChatMesh {
     }
   }
 
+  private broadcastControl(json: string): void {
+    for (const channel of this.dataChannels.values()) {
+      if (channel.readyState === 'open') {
+        channel.send(json)
+      }
+    }
+  }
+
   private removePeer(peerId: string): void {
+    this.onRemoteTypingStatus(peerId, false)
     const channel = this.dataChannels.get(peerId)
     if (channel) {
       channel.onopen = null
@@ -348,5 +395,57 @@ export class VaporWebRtcChatMesh {
       (channel) => channel.readyState === 'open',
     ).length
     this.onConnectedPeerCountChange(connectedCount)
+
+    if (connectedCount > 0) {
+      this.startStatsPolling()
+    } else {
+      this.stopStatsPolling()
+    }
+  }
+
+  private startStatsPolling(): void {
+    if (this.statsIntervalHandle !== null || this.disposed) {
+      return
+    }
+    this.statsIntervalHandle = window.setInterval(() => {
+      void this.pollStats()
+    }, 2000)
+  }
+
+  private stopStatsPolling(): void {
+    if (this.statsIntervalHandle !== null) {
+      window.clearInterval(this.statsIntervalHandle)
+      this.statsIntervalHandle = null
+    }
+  }
+
+  private async pollStats(): Promise<void> {
+    if (this.disposed) {
+      return
+    }
+
+    for (const [peerId, connection] of this.peerConnections) {
+      try {
+        const stats = await connection.getStats()
+        let bytesReceived = 0
+        let bytesSent = 0
+        stats.forEach((report) => {
+          if (report.type === 'transport') {
+            const s = report as unknown as { bytesReceived?: number; bytesSent?: number }
+            bytesReceived += s.bytesReceived ?? 0
+            bytesSent += s.bytesSent ?? 0
+          }
+        })
+        this.onTelemetryEvent({
+          kind: 'bitrate_stats',
+          peerId,
+          bytesReceived,
+          bytesSent,
+          timestampMs: Date.now(),
+        })
+      } catch {
+        // stats unavailable for this peer — skip
+      }
+    }
   }
 }

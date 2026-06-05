@@ -53,7 +53,7 @@ export function joinRoomRecord(
   socketId: string,
   now: number,
   generateParticipantId: () => string
-): { room: Phase0RoomRecord; participantId: string; peers: Array<{ participantId: string }> } | null {
+): { room: Phase0RoomRecord; participantId: string; peers: Array<{ participantId: string; nickname?: string | null }> } | null {
   const room = state.rooms.get(roomId);
   if (!room) {
     return null;
@@ -68,7 +68,8 @@ export function joinRoomRecord(
   };
 
   const peers = Array.from(room.participants.values()).map((peer) => ({
-    participantId: peer.participantId
+    participantId: peer.participantId,
+    nickname: peer.nickname ?? null
   }));
 
   room.participants.set(participantId, participantRecord);

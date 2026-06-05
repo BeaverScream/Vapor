@@ -6,8 +6,10 @@ import {
   type CreateRoomRequest,
   type HostReconnectGracePayload,
   type JoinRoomRequest,
+  type KickParticipantRequest,
   type LeaveRoomRequest,
   type NicknameUpdatedPayload,
+  type ParticipantKickedPayload,
   type PeerJoinedPayload,
   type PeerLeftPayload,
   type RoomCreatedPayload,
@@ -29,6 +31,10 @@ export function createRoomSocketClient(signalingUrl: string = SIGNALING_URL): Ro
     transports: ['websocket'],
   })
 
+  socket.io.on('pong', (latencyMs: number) => {
+    window.dispatchEvent(new CustomEvent('vapor:socket-latency', { detail: { latencyMs } }))
+  })
+
   return {
     onConnect: (handler) => socket.on('connect', handler),
     onDisconnect: (handler) => socket.on('disconnect', handler),
@@ -43,6 +49,8 @@ export function createRoomSocketClient(signalingUrl: string = SIGNALING_URL): Ro
       socket.on(SERVER_EVENTS.HOST_RECONNECT_GRACE, handler),
     onNicknameUpdated: (handler: (payload: NicknameUpdatedPayload) => void) =>
       socket.on(SERVER_EVENTS.NICKNAME_UPDATED, handler),
+    onParticipantKicked: (handler: (payload: ParticipantKickedPayload) => void) =>
+      socket.on(SERVER_EVENTS.PARTICIPANT_KICKED, handler),
     onRoomDestroyed: (handler) => socket.on(SERVER_EVENTS.ROOM_DESTROYED, handler),
     onError: (handler) => socket.on(SERVER_EVENTS.ERROR, handler),
     offConnect: (handler) => socket.off('connect', handler),
@@ -58,12 +66,15 @@ export function createRoomSocketClient(signalingUrl: string = SIGNALING_URL): Ro
       socket.off(SERVER_EVENTS.HOST_RECONNECT_GRACE, handler),
     offNicknameUpdated: (handler: (payload: NicknameUpdatedPayload) => void) =>
       socket.off(SERVER_EVENTS.NICKNAME_UPDATED, handler),
+    offParticipantKicked: (handler: (payload: ParticipantKickedPayload) => void) =>
+      socket.off(SERVER_EVENTS.PARTICIPANT_KICKED, handler),
     offRoomDestroyed: (handler) => socket.off(SERVER_EVENTS.ROOM_DESTROYED, handler),
     offError: (handler) => socket.off(SERVER_EVENTS.ERROR, handler),
     emitCreateRoom: (payload: CreateRoomRequest) => socket.emit(CLIENT_EVENTS.CREATE_ROOM, payload),
     emitJoinRoom: (payload: JoinRoomRequest) => socket.emit(CLIENT_EVENTS.JOIN_ROOM, payload),
     emitLeaveRoom: (payload: LeaveRoomRequest) => socket.emit(CLIENT_EVENTS.LEAVE_ROOM, payload),
     emitResumeSession: (payload: ResumeSessionRequest) => socket.emit(CLIENT_EVENTS.RESUME_SESSION, payload),
+    emitKickParticipant: (payload: KickParticipantRequest) => socket.emit(CLIENT_EVENTS.KICK_PARTICIPANT, payload),
     emitSignalOffer: (payload: SignalOfferRequest) => socket.emit(CLIENT_EVENTS.SIGNAL_OFFER, payload),
     emitSignalAnswer: (payload: SignalAnswerRequest) => socket.emit(CLIENT_EVENTS.SIGNAL_ANSWER, payload),
     emitSignalIce: (payload: SignalIceRequest) => socket.emit(CLIENT_EVENTS.SIGNAL_ICE, payload),

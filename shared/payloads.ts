@@ -54,7 +54,8 @@ export const SIGNALING_ERROR_MESSAGES: Record<SignalingErrorCode, string> = {
   [SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE]: "Reconnect token stale",
   [SIGNALING_ERROR_CODES.PASSWORD_VERSION_MISMATCH]: "Password version mismatch",
   [SIGNALING_ERROR_CODES.RATE_LIMITED]: "Rate limited",
-  [SIGNALING_ERROR_CODES.INVALID_SIGNAL_PAYLOAD]: "Invalid signaling payload"
+  [SIGNALING_ERROR_CODES.INVALID_SIGNAL_PAYLOAD]: "Invalid signaling payload",
+  [SIGNALING_ERROR_CODES.NOT_AUTHORIZED]: "Not authorized"
 };
 
 export function createSocketErrorPayload(code: SignalingErrorCode): SocketErrorPayload {
@@ -73,17 +74,19 @@ export type RoomCreatedPayload = {
   expiresAt: number;
   soloHostDeadlineAt?: number | null;
   participantCount: number;
+  hasPassword?: boolean;
 };
 
 export type RoomJoinedPayload = {
   roomId: string;
   participantId: string;
   hostId: string;
-  peers: Array<{ participantId: string }>;
+  peers: Array<{ participantId: string; nickname?: string | null }>;
   reconnectToken: string | null;
   expiresAt: number;
   participantNickname?: string | null;
   participantCount: number;
+  hasPassword?: boolean;
 };
 
 export type NicknameUpdatePayload = {
@@ -98,6 +101,7 @@ export type NicknameUpdatedPayload = {
 
 export type PeerJoinedPayload = {
   participantId: string;
+  nickname?: string | null;
   participantCount: number;
 };
 
@@ -136,4 +140,13 @@ export type SignalIceRelayPayload = {
   roomId: string;
   fromParticipantId: string;
   candidate: string | Record<string, unknown>;
+};
+
+export type KickParticipantPayload = {
+  roomId: string;
+  targetParticipantId: string;
+};
+
+export type ParticipantKickedPayload = {
+  participantId: string;
 };

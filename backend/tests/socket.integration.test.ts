@@ -18,6 +18,10 @@ class FakeIo {
   private roomMembership = new Map<string, Set<FakeSocket>>();
   private socketsById = new Map<string, FakeSocket>();
 
+  get sockets(): { sockets: Map<string, FakeSocket> } {
+    return { sockets: this.socketsById };
+  }
+
   on(event: string, handler: (socket: FakeSocket) => void): void {
     if (event === "connection") {
       this.connectionHandler = handler;
@@ -83,6 +87,7 @@ class FakeSocket {
 
   private handlers = new Map<string, EventHandler>();
   private inboundEvents: Array<{ event: string; payload: EventPayload }> = [];
+  private _disconnected = false;
 
   constructor(private io: FakeIo, socketId: string, options?: FakeSocketOptions) {
     this.id = socketId;
@@ -136,6 +141,14 @@ class FakeSocket {
 
     const [entry] = this.inboundEvents.splice(index, 1);
     return entry.payload;
+  }
+
+  disconnect(close?: boolean): void {
+    this._disconnected = true;
+  }
+
+  wasDisconnected(): boolean {
+    return this._disconnected;
   }
 }
 
@@ -2506,6 +2519,376 @@ test("T3.3-07 (P3-AB-007): join-attempt cooldown state is purged when a room is 
   assert.equal(popSocketError(freshGuest), undefined, "No error must be emitted after cooldown state is purged");
 });
 
+// ---- T4.1 Identity & UX Refinement ----
+
+test("T4.1-01: room_joined peers list includes nickname for every peer with values matching join/create submissions", () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest1 = io.connect("socket-guest-1");
+  const guest2 = io.connect("socket-guest-2");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Alice" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as {
+    roomId: string;
+    participantId: string;
+  };
+  assert.ok(roomCreated);
+
+  // guest1 joins — peers list must contain the host with nickname "Alice"
+  guest1.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Bob" });
+  const guest1Joined = guest1.popEvent(SERVER_EVENTS.roomJoined) as {
+    participantId: string;
+    peers: Array<{ participantId: string; nickname?: string | null }>;
+  };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  assert.ok(guest1Joined, "guest1 must receive room_joined");
+  assert.equal(guest1Joined.peers.length, 1, "guest1 peers list must contain one peer (the host)");
+  assert.equal(guest1Joined.peers[0]?.participantId, roomCreated.participantId, "Peer must be the host");
+  assert.equal(guest1Joined.peers[0]?.nickname, "Alice", "Host nickname in guest1 peers list must be 'Alice'");
+
+  // guest2 joins — peers list must contain host ("Alice") and guest1 ("Bob"), both with nicknames
+  guest2.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Carol" });
+  const guest2Joined = guest2.popEvent(SERVER_EVENTS.roomJoined) as {
+    participantId: string;
+    peers: Array<{ participantId: string; nickname?: string | null }>;
+  };
+
+  assert.ok(guest2Joined, "guest2 must receive room_joined");
+  assert.equal(guest2Joined.peers.length, 2, "guest2 peers list must contain two peers (host and guest1)");
+
+  const hostPeer = guest2Joined.peers.find((p) => p.participantId === roomCreated.participantId);
+  const guest1Peer = guest2Joined.peers.find((p) => p.participantId === guest1Joined.participantId);
+  assert.ok(hostPeer, "Host must appear in guest2 peers list");
+  assert.equal(hostPeer.nickname, "Alice", "Host nickname must be 'Alice' in guest2 peers list");
+  assert.ok(guest1Peer, "Guest1 must appear in guest2 peers list");
+  assert.equal(guest1Peer.nickname, "Bob", "Guest1 nickname must be 'Bob' in guest2 peers list");
+});
+
+test("T4.1-02: peer_joined includes the joining peer's nickname field with the correct value", () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest1 = io.connect("socket-guest-1");
+  const guest2 = io.connect("socket-guest-2");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  host.popEvent(SERVER_EVENTS.roomCreated);
+
+  // guest1 joins with nickname "Bob" — host must receive peer_joined with nickname "Bob"
+  guest1.trigger(CLIENT_EVENTS.joinRoom, { roomId: "AbC123", password: "pw", nickname: "Bob" });
+  guest1.popEvent(SERVER_EVENTS.roomJoined);
+
+  const hostPeerJoined1 = host.popEvent(SERVER_EVENTS.peerJoined) as {
+    participantId: string;
+    nickname?: string | null;
+    participantCount: number;
+  };
+
+  assert.ok(hostPeerJoined1, "Host must receive peer_joined when guest1 joins");
+  assert.equal(hostPeerJoined1.nickname, "Bob", "peer_joined to host must include guest1's nickname 'Bob'");
+
+  // guest2 joins with nickname "Carol" — both host and guest1 receive peer_joined with "Carol"
+  guest2.trigger(CLIENT_EVENTS.joinRoom, { roomId: "AbC123", password: "pw", nickname: "Carol" });
+  guest2.popEvent(SERVER_EVENTS.roomJoined);
+
+  const hostPeerJoined2 = host.popEvent(SERVER_EVENTS.peerJoined) as {
+    participantId: string;
+    nickname?: string | null;
+    participantCount: number;
+  };
+  const guest1PeerJoined2 = guest1.popEvent(SERVER_EVENTS.peerJoined) as {
+    participantId: string;
+    nickname?: string | null;
+    participantCount: number;
+  };
+
+  assert.ok(hostPeerJoined2, "Host must receive peer_joined when guest2 joins");
+  assert.equal(hostPeerJoined2.nickname, "Carol", "peer_joined to host must include guest2's nickname 'Carol'");
+  assert.ok(guest1PeerJoined2, "Guest1 must receive peer_joined when guest2 joins");
+  assert.equal(guest1PeerJoined2.nickname, "Carol", "peer_joined to guest1 must include guest2's nickname 'Carol'");
+});
+
+test("T4.1-04: room_created includes participantNickname matching the nickname submitted at creation", () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("socket-host");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Alice" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as {
+    roomId: string;
+    participantId: string;
+    participantNickname?: string | null;
+  };
+
+  assert.ok(roomCreated, "room_created must be emitted");
+  assert.equal(
+    roomCreated.participantNickname,
+    "Alice",
+    "room_created must include participantNickname matching the nickname submitted at creation"
+  );
+});
+
+test("T4.1-05: resume_session response includes participantNickname for the resuming participant and peers list entries each carrying a nickname", async () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest = io.connect("socket-guest");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Alice" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as {
+    roomId: string;
+    participantId: string;
+    reconnectToken: string;
+  };
+  assert.ok(roomCreated);
+
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Bob" });
+  guest.popEvent(SERVER_EVENTS.roomJoined);
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  // Host disconnects — opens grace window
+  host.triggerDisconnect();
+  const hostGrace = guest.popEvent(SERVER_EVENTS.hostReconnectGrace) as { deadlineAt: number };
+  assert.ok(hostGrace, "host_reconnect_grace must be emitted on host disconnect");
+
+  // Host resumes on a new socket
+  const resumedHost = io.connect("socket-host-resumed");
+  resumedHost.trigger(CLIENT_EVENTS.resumeSession, {
+    roomId: roomCreated.roomId,
+    reconnectToken: roomCreated.reconnectToken,
+  });
+  await flushPromises();
+
+  const resumeRoomJoined = resumedHost.popEvent(SERVER_EVENTS.roomJoined) as {
+    roomId: string;
+    participantId: string;
+    participantNickname?: string | null;
+    peers: Array<{ participantId: string; nickname?: string | null }>;
+  };
+
+  assert.ok(resumeRoomJoined, "Resumed host must receive room_joined");
+  assert.equal(
+    resumeRoomJoined.participantNickname,
+    "Alice",
+    "resume_session room_joined must include participantNickname for the resuming participant"
+  );
+  assert.equal(resumeRoomJoined.peers.length, 1, "Peers list must contain one peer (the guest)");
+  assert.equal(
+    resumeRoomJoined.peers[0]?.nickname,
+    "Bob",
+    "Each peer in the resume_session peers list must carry a nickname"
+  );
+});
+
+// ---- T4.3 Open Rooms (Password-less) ----
+
+test("T4.3-01: room creation without a password succeeds and creates an open room", () => {
+  const { io, hooks } = setupSocketHarness();
+  const host = io.connect("socket-host");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { nickname: "Host" });
+
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as {
+    roomId: string;
+    participantId: string;
+  } | undefined;
+
+  assert.ok(roomCreated, "room_created must be emitted for a passwordless create_room");
+  assert.equal(popSocketError(host), undefined, "No error must be emitted for a valid open room creation");
+
+  const snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.roomCount, 1, "Open room must be created in state");
+  assert.equal(snapshot.rooms[0]?.participantCount, 1, "Host must be the sole participant");
+});
+
+test("T4.3-02: joining an open room without a password succeeds", () => {
+  const { io, hooks } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest = io.connect("socket-guest");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, nickname: "Guest" });
+
+  const roomJoined = guest.popEvent(SERVER_EVENTS.roomJoined);
+  assert.ok(roomJoined, "Guest must receive room_joined when joining an open room without a password");
+  assert.equal(popSocketError(guest), undefined, "No error must be emitted for a passwordless join on an open room");
+
+  const snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.roomCount, 1);
+  assert.equal(snapshot.rooms[0]?.participantCount, 2, "Both host and guest must be present after passwordless join");
+});
+
+test("T4.3-03: room_created carries hasPassword: false for open rooms and hasPassword: true for password-protected rooms; room_joined reflects the same", () => {
+  const roomIdFactory = createSequenceFactory(["OPEN-1", "PROT-1"], "FALLBACK");
+  const { io } = setupSocketHarness({ generateRoomId: roomIdFactory });
+
+  const hostOpen = io.connect("socket-host-open");
+  const hostProt = io.connect("socket-host-prot");
+
+  // Create an open room (no password)
+  hostOpen.trigger(CLIENT_EVENTS.createRoom, { nickname: "HostOpen" });
+  const openCreated = hostOpen.popEvent(SERVER_EVENTS.roomCreated) as {
+    roomId: string;
+    hasPassword?: boolean;
+  };
+  assert.ok(openCreated, "room_created must be emitted for an open room");
+  assert.equal(openCreated.hasPassword, false, "room_created must carry hasPassword: false for an open room");
+
+  // Create a password-protected room
+  hostProt.trigger(CLIENT_EVENTS.createRoom, { password: "secret", nickname: "HostProt" });
+  const protCreated = hostProt.popEvent(SERVER_EVENTS.roomCreated) as {
+    roomId: string;
+    hasPassword?: boolean;
+  };
+  assert.ok(protCreated, "room_created must be emitted for a password-protected room");
+  assert.equal(protCreated.hasPassword, true, "room_created must carry hasPassword: true for a password-protected room");
+
+  // Guest joins open room — room_joined must carry hasPassword: false
+  const guestOpen = io.connect("socket-guest-open");
+  guestOpen.trigger(CLIENT_EVENTS.joinRoom, { roomId: openCreated.roomId, nickname: "GuestOpen" });
+  const openJoined = guestOpen.popEvent(SERVER_EVENTS.roomJoined) as {
+    hasPassword?: boolean;
+  };
+  assert.ok(openJoined, "Guest must receive room_joined for open room");
+  assert.equal(openJoined.hasPassword, false, "room_joined must carry hasPassword: false when joining an open room");
+
+  // Guest joins password-protected room — room_joined must carry hasPassword: true
+  const guestProt = io.connect("socket-guest-prot");
+  guestProt.trigger(CLIENT_EVENTS.joinRoom, { roomId: protCreated.roomId, password: "secret", nickname: "GuestProt" });
+  const protJoined = guestProt.popEvent(SERVER_EVENTS.roomJoined) as {
+    hasPassword?: boolean;
+  };
+  assert.ok(protJoined, "Guest must receive room_joined for password-protected room");
+  assert.equal(protJoined.hasPassword, true, "room_joined must carry hasPassword: true when joining a password-protected room");
+});
+
+test("T4.3-04: resume_session response includes the correct hasPassword value reflecting the room's protection state at resume time", async () => {
+  const roomIdFactory = createSequenceFactory(["OPEN-R", "PROT-R"], "FALLBACK");
+  const { io } = setupSocketHarness({ generateRoomId: roomIdFactory });
+
+  // --- Open room: host disconnects and resumes ---
+  const hostOpen = io.connect("socket-host-open");
+  const guestOpen = io.connect("socket-guest-open");
+
+  hostOpen.trigger(CLIENT_EVENTS.createRoom, { nickname: "HostOpen" });
+  const openCreated = hostOpen.popEvent(SERVER_EVENTS.roomCreated) as {
+    roomId: string;
+    reconnectToken: string;
+  };
+  assert.ok(openCreated);
+
+  guestOpen.trigger(CLIENT_EVENTS.joinRoom, { roomId: openCreated.roomId, nickname: "GuestOpen" });
+  guestOpen.popEvent(SERVER_EVENTS.roomJoined);
+  hostOpen.popEvent(SERVER_EVENTS.peerJoined);
+
+  hostOpen.triggerDisconnect();
+  const openGrace = guestOpen.popEvent(SERVER_EVENTS.hostReconnectGrace) as { deadlineAt: number };
+  assert.ok(openGrace, "host_reconnect_grace must be emitted to guest in open room on host disconnect");
+
+  const resumedHostOpen = io.connect("socket-host-open-resumed");
+  resumedHostOpen.trigger(CLIENT_EVENTS.resumeSession, {
+    roomId: openCreated.roomId,
+    reconnectToken: openCreated.reconnectToken,
+  });
+  await flushPromises();
+
+  const openResumeJoined = resumedHostOpen.popEvent(SERVER_EVENTS.roomJoined) as {
+    hasPassword?: boolean;
+  };
+  assert.ok(openResumeJoined, "Resumed host must receive room_joined for open room");
+  assert.equal(openResumeJoined.hasPassword, false, "resume_session room_joined must carry hasPassword: false for an open room");
+
+  // --- Password-protected room: host disconnects and resumes ---
+  const hostProt = io.connect("socket-host-prot");
+  const guestProt = io.connect("socket-guest-prot");
+
+  hostProt.trigger(CLIENT_EVENTS.createRoom, { password: "secret", nickname: "HostProt" });
+  const protCreated = hostProt.popEvent(SERVER_EVENTS.roomCreated) as {
+    roomId: string;
+    reconnectToken: string;
+  };
+  assert.ok(protCreated);
+
+  guestProt.trigger(CLIENT_EVENTS.joinRoom, { roomId: protCreated.roomId, password: "secret", nickname: "GuestProt" });
+  guestProt.popEvent(SERVER_EVENTS.roomJoined);
+  hostProt.popEvent(SERVER_EVENTS.peerJoined);
+
+  hostProt.triggerDisconnect();
+  const protGrace = guestProt.popEvent(SERVER_EVENTS.hostReconnectGrace) as { deadlineAt: number };
+  assert.ok(protGrace, "host_reconnect_grace must be emitted to guest in password-protected room on host disconnect");
+
+  const resumedHostProt = io.connect("socket-host-prot-resumed");
+  resumedHostProt.trigger(CLIENT_EVENTS.resumeSession, {
+    roomId: protCreated.roomId,
+    reconnectToken: protCreated.reconnectToken,
+  });
+  await flushPromises();
+
+  const protResumeJoined = resumedHostProt.popEvent(SERVER_EVENTS.roomJoined) as {
+    hasPassword?: boolean;
+  };
+  assert.ok(protResumeJoined, "Resumed host must receive room_joined for password-protected room");
+  assert.equal(protResumeJoined.hasPassword, true, "resume_session room_joined must carry hasPassword: true for a password-protected room");
+});
+
+test("T4.3-05: joining an open room with a non-empty password supplied still succeeds (open rooms ignore the password field)", () => {
+  const { io, hooks } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest = io.connect("socket-guest");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  // Join with a non-empty password — open room must accept it
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "anypassword", nickname: "Guest" });
+
+  const roomJoined = guest.popEvent(SERVER_EVENTS.roomJoined);
+  assert.ok(roomJoined, "Guest must be allowed to join an open room even when supplying a non-empty password");
+  assert.equal(popSocketError(guest), undefined, "No error must be emitted when joining an open room with an extraneous password");
+
+  const snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.rooms[0]?.participantCount, 2, "Both participants must be present after password-supplied join of an open room");
+});
+
+test("T4.3-06: room_password_update on an open room returns NOT_AUTHORIZED and no state mutation occurs", async () => {
+  const { io, hooks } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest = io.connect("socket-guest");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, nickname: "Guest" });
+  guest.popEvent(SERVER_EVENTS.roomJoined);
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  // Host attempts to set a password on an open room — must be rejected with NOT_AUTHORIZED
+  host.trigger(CLIENT_EVENTS.roomPasswordUpdate, { roomId: roomCreated.roomId, newPassword: "newpassword" });
+  await flushPromises();
+
+  const authError = popSocketError(host);
+  assert.ok(authError, "Host must receive an error when calling room_password_update on an open room");
+  assert.equal(authError.code, "NOT_AUTHORIZED", "room_password_update on an open room must return NOT_AUTHORIZED");
+
+  // No broadcast must have been emitted
+  assert.equal(host.popEvent(SERVER_EVENTS.roomPasswordUpdated), undefined, "No room_password_updated must be emitted to host for open-room update attempt");
+  assert.equal(guest.popEvent(SERVER_EVENTS.roomPasswordUpdated), undefined, "No room_password_updated must be emitted to guest for open-room update attempt");
+
+  // Verify no state mutation — a new guest can still join without a password
+  const newGuest = io.connect("socket-new-guest");
+  newGuest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, nickname: "NewGuest" });
+  const newGuestJoined = newGuest.popEvent(SERVER_EVENTS.roomJoined);
+  assert.ok(newGuestJoined, "Room must remain open (no password) after the rejected password update");
+  assert.equal(popSocketError(newGuest), undefined, "Passwordless join must still succeed after rejected open-room password update");
+
+  const snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.roomCount, 1);
+  assert.equal(snapshot.rooms[0]?.participantCount, 3, "Room must have 3 participants: host, original guest, new guest");
+});
+
 test("T3.3-08 (P3-AB-008): join-attempt cooldown resets after expiry and the next correct-password attempt succeeds", () => {
   let timeNow = 1000;
   const { io } = setupSocketHarness({ now: () => timeNow });
@@ -2550,4 +2933,365 @@ test("T3.3-08 (P3-AB-008): join-attempt cooldown resets after expiry and the nex
   assert.equal(popSocketError(socketAfterCooldown), undefined, "No error must be emitted after cooldown resets");
 
   host.popEvent(SERVER_EVENTS.peerJoined);
+});
+
+// ---- T4.4 Advanced Peer Interaction ----
+
+test("T4.4-01: non-host kick attempt returns NOT_AUTHORIZED and no state change occurs", () => {
+  const { io, hooks } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest1 = io.connect("socket-guest-1");
+  const guest2 = io.connect("socket-guest-2");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  guest1.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest1" });
+  const guest1Joined = guest1.popEvent(SERVER_EVENTS.roomJoined) as { participantId: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  guest2.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest2" });
+  const guest2Joined = guest2.popEvent(SERVER_EVENTS.roomJoined) as { participantId: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+  guest1.popEvent(SERVER_EVENTS.peerJoined);
+
+  // Guest1 (non-host) attempts to kick Guest2
+  guest1.trigger(CLIENT_EVENTS.kickParticipant, { roomId: roomCreated.roomId, targetParticipantId: guest2Joined.participantId });
+
+  const kickError = popSocketError(guest1);
+  assert.ok(kickError, "Non-host must receive an error when attempting to kick");
+  assert.equal(kickError.code, "NOT_AUTHORIZED", "Non-host kick attempt must return NOT_AUTHORIZED");
+
+  // No participant_kicked must be emitted to any participant
+  assert.equal(host.popEvent(SERVER_EVENTS.participantKicked), undefined, "No participant_kicked must reach host on unauthorized kick");
+  assert.equal(guest1.popEvent(SERVER_EVENTS.participantKicked), undefined, "No participant_kicked must reach kicker on unauthorized kick");
+  assert.equal(guest2.popEvent(SERVER_EVENTS.participantKicked), undefined, "No participant_kicked must reach target on unauthorized kick");
+
+  // State must be unchanged
+  const snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.roomCount, 1);
+  assert.equal(snapshot.rooms[0]?.participantCount, 3, "Participant count must remain 3 after unauthorized kick attempt");
+  assert.equal(snapshot.participantToRoomCount, 3, "participantToRoom index must be unchanged after unauthorized kick");
+  assert.equal(snapshot.socketToParticipantCount, 3, "socketToParticipant index must be unchanged after unauthorized kick");
+});
+
+test("T4.4-02: successful kick broadcasts participant_kicked to all room members including the kicked participant", () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest1 = io.connect("socket-guest-1");
+  const guest2 = io.connect("socket-guest-2");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  guest1.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest1" });
+  const guest1Joined = guest1.popEvent(SERVER_EVENTS.roomJoined) as { participantId: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  guest2.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest2" });
+  guest2.popEvent(SERVER_EVENTS.roomJoined);
+  host.popEvent(SERVER_EVENTS.peerJoined);
+  guest1.popEvent(SERVER_EVENTS.peerJoined);
+
+  // Host kicks guest1
+  host.trigger(CLIENT_EVENTS.kickParticipant, { roomId: roomCreated.roomId, targetParticipantId: guest1Joined.participantId });
+
+  // All three participants must receive participant_kicked with the correct participantId
+  const hostKicked = host.popEvent(SERVER_EVENTS.participantKicked) as { participantId: string } | undefined;
+  const guest1Kicked = guest1.popEvent(SERVER_EVENTS.participantKicked) as { participantId: string } | undefined;
+  const guest2Kicked = guest2.popEvent(SERVER_EVENTS.participantKicked) as { participantId: string } | undefined;
+
+  assert.ok(hostKicked, "Host must receive participant_kicked after a successful kick");
+  assert.equal(hostKicked.participantId, guest1Joined.participantId, "participant_kicked to host must carry the kicked participant's id");
+
+  assert.ok(guest1Kicked, "Kicked participant must receive participant_kicked");
+  assert.equal(guest1Kicked.participantId, guest1Joined.participantId, "participant_kicked to the kicked participant must carry their own id");
+
+  assert.ok(guest2Kicked, "Remaining guest must receive participant_kicked");
+  assert.equal(guest2Kicked.participantId, guest1Joined.participantId, "participant_kicked to guest2 must carry the kicked participant's id");
+
+  // No error must be emitted to the host
+  assert.equal(popSocketError(host), undefined, "No error must be emitted to host on a successful kick");
+});
+
+test("T4.4-03: state cleanup after a successful kick removes participant from all indexes and disconnects the kicked socket", () => {
+  const { io, hooks } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest = io.connect("socket-guest");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest" });
+  const guestJoined = guest.popEvent(SERVER_EVENTS.roomJoined) as { participantId: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  const snapshotBefore = hooks.getStateSnapshot();
+  assert.equal(snapshotBefore.rooms[0]?.participantCount, 2, "Room must have 2 participants before kick");
+  assert.equal(snapshotBefore.participantToRoomCount, 2);
+  assert.equal(snapshotBefore.socketToParticipantCount, 2);
+
+  // Host kicks guest
+  host.trigger(CLIENT_EVENTS.kickParticipant, { roomId: roomCreated.roomId, targetParticipantId: guestJoined.participantId });
+  host.popEvent(SERVER_EVENTS.participantKicked);
+  guest.popEvent(SERVER_EVENTS.participantKicked);
+
+  // All three indexes must reflect the kicked participant's removal
+  const snapshotAfter = hooks.getStateSnapshot();
+  assert.equal(snapshotAfter.roomCount, 1, "Room must remain after kicking a guest");
+  assert.equal(snapshotAfter.rooms[0]?.participantCount, 1, "Kicked participant must be removed from room.participants");
+  assert.equal(snapshotAfter.participantToRoomCount, 1, "participantToRoom must drop to 1 after kick");
+  assert.equal(snapshotAfter.socketToParticipantCount, 1, "socketToParticipant must drop to 1 after kick");
+
+  // Kicked socket must have been explicitly disconnected
+  assert.equal(guest.wasDisconnected(), true, "Kicked socket must be explicitly disconnected via io.sockets.sockets");
+});
+
+test("T4.4-04: resume_session with the kicked participant's reconnect token returns ROOM_NOT_FOUND after kick", async () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest = io.connect("socket-guest");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest" });
+  const guestJoined = guest.popEvent(SERVER_EVENTS.roomJoined) as {
+    participantId: string;
+    reconnectToken: string;
+  };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  // Host kicks guest — this purges the reconnect token
+  host.trigger(CLIENT_EVENTS.kickParticipant, { roomId: roomCreated.roomId, targetParticipantId: guestJoined.participantId });
+  host.popEvent(SERVER_EVENTS.participantKicked);
+  guest.popEvent(SERVER_EVENTS.participantKicked);
+
+  // Attempt to resume with the now-purged token — must fail with ROOM_NOT_FOUND
+  const kickedResumed = io.connect("socket-kicked-resumed");
+  kickedResumed.trigger(CLIENT_EVENTS.resumeSession, {
+    roomId: roomCreated.roomId,
+    reconnectToken: guestJoined.reconnectToken,
+  });
+  await flushPromises();
+
+  assert.equal(
+    kickedResumed.popEvent(SERVER_EVENTS.roomJoined),
+    undefined,
+    "Resume must be rejected for a kicked participant"
+  );
+  const resumeError = popSocketError(kickedResumed);
+  assert.ok(resumeError, "Error must be emitted for a kicked participant's resume attempt");
+  assert.equal(resumeError.code, "ROOM_NOT_FOUND", "Kicked participant's reconnect token must be purged, returning ROOM_NOT_FOUND on resume");
+});
+
+test("T4.4-05: room participant count decreases by one after a successful kick; no room_destroyed emitted to remaining participants", () => {
+  const { io, hooks } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest1 = io.connect("socket-guest-1");
+  const guest2 = io.connect("socket-guest-2");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  guest1.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest1" });
+  const guest1Joined = guest1.popEvent(SERVER_EVENTS.roomJoined) as { participantId: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  guest2.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest2" });
+  guest2.popEvent(SERVER_EVENTS.roomJoined);
+  host.popEvent(SERVER_EVENTS.peerJoined);
+  guest1.popEvent(SERVER_EVENTS.peerJoined);
+
+  const snapshotBefore = hooks.getStateSnapshot();
+  assert.equal(snapshotBefore.rooms[0]?.participantCount, 3, "Room must have 3 participants before kick");
+
+  // Host kicks guest1
+  host.trigger(CLIENT_EVENTS.kickParticipant, { roomId: roomCreated.roomId, targetParticipantId: guest1Joined.participantId });
+  host.popEvent(SERVER_EVENTS.participantKicked);
+  guest1.popEvent(SERVER_EVENTS.participantKicked);
+  guest2.popEvent(SERVER_EVENTS.participantKicked);
+
+  // Participant count must decrease by exactly one; room must remain active
+  const snapshotAfter = hooks.getStateSnapshot();
+  assert.equal(snapshotAfter.roomCount, 1, "Room must remain active after kicking a participant");
+  assert.equal(snapshotAfter.rooms[0]?.participantCount, 2, "Participant count must decrease by one after a successful kick");
+
+  // No room_destroyed must be emitted to remaining participants
+  assert.equal(host.popEvent(SERVER_EVENTS.roomDestroyed), undefined, "No room_destroyed must be emitted to host after kick");
+  assert.equal(guest2.popEvent(SERVER_EVENTS.roomDestroyed), undefined, "No room_destroyed must be emitted to remaining guest after kick");
+});
+
+test("T4.4-06: host attempting to kick themselves returns INVALID_SIGNAL_PAYLOAD and no state change occurs", () => {
+  const { io, hooks } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest = io.connect("socket-guest");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string; participantId: string };
+  assert.ok(roomCreated);
+
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest" });
+  guest.popEvent(SERVER_EVENTS.roomJoined);
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  // Host attempts to kick themselves
+  host.trigger(CLIENT_EVENTS.kickParticipant, { roomId: roomCreated.roomId, targetParticipantId: roomCreated.participantId });
+
+  const selfKickError = popSocketError(host);
+  assert.ok(selfKickError, "Host must receive an error when attempting to kick themselves");
+  assert.equal(selfKickError.code, "INVALID_SIGNAL_PAYLOAD", "Self-kick must return INVALID_SIGNAL_PAYLOAD");
+
+  // No participant_kicked must be emitted to any participant
+  assert.equal(host.popEvent(SERVER_EVENTS.participantKicked), undefined, "No participant_kicked must be emitted to host on self-kick");
+  assert.equal(guest.popEvent(SERVER_EVENTS.participantKicked), undefined, "No participant_kicked must be emitted to guest on self-kick");
+
+  // State must be unchanged
+  const snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.roomCount, 1);
+  assert.equal(snapshot.rooms[0]?.participantCount, 2, "Participant count must remain 2 after self-kick attempt");
+  assert.equal(snapshot.participantToRoomCount, 2);
+  assert.equal(snapshot.socketToParticipantCount, 2);
+});
+
+test("T4.4-07: kick_participant with missing roomId or empty targetParticipantId returns INVALID_SIGNAL_PAYLOAD", () => {
+  const { io, hooks } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest = io.connect("socket-guest");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest" });
+  const guestJoined = guest.popEvent(SERVER_EVENTS.roomJoined) as { participantId: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  // Missing roomId: should return INVALID_SIGNAL_PAYLOAD
+  host.trigger(CLIENT_EVENTS.kickParticipant, { targetParticipantId: guestJoined.participantId });
+  const missingRoomIdError = popSocketError(host);
+  assert.ok(missingRoomIdError, "Host must receive an error when roomId is missing");
+  assert.equal(missingRoomIdError.code, "INVALID_SIGNAL_PAYLOAD", "Missing roomId must return INVALID_SIGNAL_PAYLOAD");
+
+  // Empty/whitespace-only targetParticipantId: should return INVALID_SIGNAL_PAYLOAD
+  host.trigger(CLIENT_EVENTS.kickParticipant, { roomId: roomCreated.roomId, targetParticipantId: "   " });
+  const emptyTargetError = popSocketError(host);
+  assert.ok(emptyTargetError, "Host must receive an error when targetParticipantId is empty/whitespace");
+  assert.equal(emptyTargetError.code, "INVALID_SIGNAL_PAYLOAD", "Empty targetParticipantId must return INVALID_SIGNAL_PAYLOAD");
+
+  // State must be unchanged after both invalid payloads
+  const snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.roomCount, 1);
+  assert.equal(snapshot.rooms[0]?.participantCount, 2, "Participant count must remain 2 after invalid kick payloads");
+  assert.equal(snapshot.participantToRoomCount, 2);
+  assert.equal(snapshot.socketToParticipantCount, 2);
+});
+
+test("T4.4-08: kick_participant with a targetParticipantId that does not exist in the room returns ROOM_NOT_FOUND", () => {
+  const { io, hooks } = setupSocketHarness();
+  const host = io.connect("socket-host");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  // Host attempts to kick a participant that does not exist in the room
+  host.trigger(CLIENT_EVENTS.kickParticipant, { roomId: roomCreated.roomId, targetParticipantId: "nonexistent-participant" });
+
+  const unknownTargetError = popSocketError(host);
+  assert.ok(unknownTargetError, "Host must receive an error when the target participant does not exist");
+  assert.equal(unknownTargetError.code, "ROOM_NOT_FOUND", "Unknown target participant must return ROOM_NOT_FOUND");
+
+  // No participant_kicked must be emitted
+  assert.equal(host.popEvent(SERVER_EVENTS.participantKicked), undefined, "No participant_kicked must be emitted for unknown target");
+
+  // State must be unchanged
+  const snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.roomCount, 1);
+  assert.equal(snapshot.rooms[0]?.participantCount, 1, "Participant count must remain 1 after unknown target kick attempt");
+  assert.equal(snapshot.participantToRoomCount, 1);
+  assert.equal(snapshot.socketToParticipantCount, 1);
+});
+
+test("T4.4-09: kick_participant from a socket not associated with any room returns ROOM_NOT_FOUND", () => {
+  const { io, hooks } = setupSocketHarness();
+  const outsider = io.connect("socket-outsider");
+
+  // Outsider has no room association — kick must fail with ROOM_NOT_FOUND
+  outsider.trigger(CLIENT_EVENTS.kickParticipant, { roomId: "some-room-id", targetParticipantId: "some-participant-id" });
+
+  const noRoomError = popSocketError(outsider);
+  assert.ok(noRoomError, "Socket with no room association must receive an error when attempting to kick");
+  assert.equal(noRoomError.code, "ROOM_NOT_FOUND", "Socket with no room association must return ROOM_NOT_FOUND");
+
+  // State must remain empty
+  const snapshot = hooks.getStateSnapshot();
+  assert.equal(snapshot.roomCount, 0);
+  assert.equal(snapshot.participantToRoomCount, 0);
+  assert.equal(snapshot.socketToParticipantCount, 0);
+});
+
+test("T4.4-10: kicking a guest in the grace window removes their entry from state and purges the reconnect token", async () => {
+  const { io, hooks } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest = io.connect("socket-guest");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  assert.ok(roomCreated);
+
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest" });
+  const guestJoined = guest.popEvent(SERVER_EVENTS.roomJoined) as {
+    participantId: string;
+    reconnectToken: string;
+  };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  // Guest disconnects — enters grace window; socketId is prefixed with disconnected:
+  guest.triggerDisconnect();
+
+  // During grace window: room still has 2 participants but socketToParticipant only has host
+  const snapshotDuringGrace = hooks.getStateSnapshot();
+  assert.equal(snapshotDuringGrace.rooms[0]?.participantCount, 2, "Guest must remain in room during grace window");
+  assert.equal(snapshotDuringGrace.socketToParticipantCount, 1, "Guest's socket must be removed from index on disconnect");
+
+  // Host kicks the grace-window guest
+  host.trigger(CLIENT_EVENTS.kickParticipant, { roomId: roomCreated.roomId, targetParticipantId: guestJoined.participantId });
+
+  // participant_kicked must be broadcast to the room (host and any connected sockets)
+  const hostKicked = host.popEvent(SERVER_EVENTS.participantKicked) as { participantId: string } | undefined;
+  assert.ok(hostKicked, "Host must receive participant_kicked when kicking a grace-window guest");
+  assert.equal(hostKicked.participantId, guestJoined.participantId, "participant_kicked must carry the kicked participant's id");
+
+  // No error must be emitted to the host
+  assert.equal(popSocketError(host), undefined, "No error must be emitted to host on a successful grace-window kick");
+
+  // State must reflect removal of the kicked participant
+  const snapshotAfterKick = hooks.getStateSnapshot();
+  assert.equal(snapshotAfterKick.roomCount, 1, "Room must remain active after kicking a grace-window guest");
+  assert.equal(snapshotAfterKick.rooms[0]?.participantCount, 1, "Kicked grace-window guest must be removed from room.participants");
+  assert.equal(snapshotAfterKick.participantToRoomCount, 1, "participantToRoom must drop to 1 after grace-window kick");
+  assert.equal(snapshotAfterKick.socketToParticipantCount, 1, "socketToParticipant must remain at 1 (guest socket was already removed on disconnect)");
+
+  // Reconnect token must be purged — resume must fail with ROOM_NOT_FOUND
+  const kickedResumed = io.connect("socket-kicked-grace-resumed");
+  kickedResumed.trigger(CLIENT_EVENTS.resumeSession, {
+    roomId: roomCreated.roomId,
+    reconnectToken: guestJoined.reconnectToken,
+  });
+  await flushPromises();
+
+  assert.equal(
+    kickedResumed.popEvent(SERVER_EVENTS.roomJoined),
+    undefined,
+    "Resume must be rejected after kicking a grace-window participant"
+  );
+  const resumeError = popSocketError(kickedResumed);
+  assert.ok(resumeError, "Error must be emitted when kicked grace-window participant attempts to resume");
+  assert.equal(resumeError.code, "ROOM_NOT_FOUND", "Kicked grace-window participant's reconnect token must be purged");
 });

@@ -1,6 +1,7 @@
+import { memo } from 'react'
 import { Alert, AlertDescription } from '../../components/ui/alert'
 import { Button } from '../../components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'   
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Input } from '../../components/ui/input'
 import { Label } from '../../components/ui/label'
 import { cn } from '../../lib/utils'
@@ -23,7 +24,7 @@ interface LobbyViewProps {
   onSubmit: () => void
 }
 
-export function LobbyView({
+export const LobbyView = memo(function LobbyView({
   lobbyMode,
   roomIdInput,
   passwordInput,
@@ -104,15 +105,28 @@ export function LobbyView({
           ) : null}
 
           <div className="grid gap-2">
-            <Label htmlFor="password-input">Password</Label>
-            <Input
-              id="password-input"
-              type="password"
-              value={passwordInput}
-              onChange={(event) => onPasswordChange(event.target.value)}
-              placeholder="Required"
-              autoComplete="off"
-            />
+            <Label htmlFor="password-input">
+              {lobbyMode === 'join' ? 'Password' : 'Password (optional)'}
+            </Label>
+            {lobbyMode === 'join' ? (
+              <Input
+                id="password-input"
+                type="password"
+                value={passwordInput}
+                onChange={(event) => onPasswordChange(event.target.value)}
+                placeholder="Required"
+                autoComplete="off"
+              />
+            ) : (
+              <Input
+                id="password-input"
+                type="password"
+                value={passwordInput}
+                onChange={(event) => onPasswordChange(event.target.value)}
+                placeholder="Leave blank for open room"
+                autoComplete="off"
+              />
+            )}
           </div>
 
           <div className="grid gap-2">
@@ -149,4 +163,4 @@ export function LobbyView({
       </CardContent>
     </Card>
   )
-}
+})

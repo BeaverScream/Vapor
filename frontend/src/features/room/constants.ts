@@ -49,4 +49,5 @@ export const UI_COPY = {
   JOIN_RATE_LIMITED: 'Too many attempts for this room. Try again later.',
   SOLO_HOST_WARNING: 'Solo room expires if no guest joins in',
   INVALID_NICKNAME: 'Nickname must be 3–24 characters (letters, numbers, spaces, - or _).',
+  KICKED_FROM_ROOM: 'You were removed from this room by the host.',
 } as const

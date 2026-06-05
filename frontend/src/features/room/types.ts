@@ -5,7 +5,9 @@ import {
   type CreateRoomPayload,
   type HostReconnectGracePayload as SharedHostReconnectGracePayload,
   type JoinRoomPayload,
+  type KickParticipantPayload as SharedKickParticipantPayload,
   type NicknameUpdatedPayload as SharedNicknameUpdatedPayload,
+  type ParticipantKickedPayload as SharedParticipantKickedPayload,
   type PeerJoinedPayload as SharedPeerJoinedPayload,
   type PeerLeftPayload as SharedPeerLeftPayload,
   type ResumeSessionPayload as SharedResumeSessionPayload,
@@ -31,6 +33,7 @@ export const CLIENT_EVENTS = {
   SIGNAL_ICE: CLIENT_EVENT_NAMES.SIGNAL_ICE,
   RESUME_SESSION: CLIENT_EVENT_NAMES.RESUME_SESSION,
   ROOM_PASSWORD_UPDATE: CLIENT_EVENT_NAMES.ROOM_PASSWORD_UPDATE,
+  KICK_PARTICIPANT: CLIENT_EVENT_NAMES.KICK_PARTICIPANT,
 } as const
 
 export const SERVER_EVENTS = {
@@ -45,6 +48,7 @@ export const SERVER_EVENTS = {
   HOST_RECONNECT_GRACE: SERVER_EVENT_NAMES.HOST_RECONNECT_GRACE,
   ROOM_PASSWORD_UPDATED: SERVER_EVENT_NAMES.ROOM_PASSWORD_UPDATED,
   ROOM_DESTROYED: SERVER_EVENT_NAMES.ROOM_DESTROYED,
+  PARTICIPANT_KICKED: SERVER_EVENT_NAMES.PARTICIPANT_KICKED,
   ERROR: SERVER_EVENT_NAMES.ERROR,
 } as const
 
@@ -79,8 +83,12 @@ export interface ChatMessage {
   senderParticipantId: string
   text: string
   sentAtMs: number
-  direction: 'outgoing' | 'incoming'
+  direction: 'outgoing' | 'incoming' | 'system'
 }
+
+export type KickParticipantPayload = SharedKickParticipantPayload
+
+export type ParticipantKickedPayload = SharedParticipantKickedPayload
 
 export type NicknameUpdatedPayload = SharedNicknameUpdatedPayload
 
@@ -115,6 +123,8 @@ export interface JoinRoomRequest extends Required<JoinRoomPayload> {}
 export interface LeaveRoomRequest {
   roomId: string
 }
+
+export interface KickParticipantRequest extends Required<KickParticipantPayload> {}
 
 export type RoomJoinedPayload = SharedRoomJoinedPayload
 
@@ -153,6 +163,8 @@ export interface RoomSessionState {
   joinRateLimitUntil: number | null
   joinRateLimitRoomId: string | null
   participantNicknames: Record<string, string>
+  hasPassword: boolean
+  typingPeerIds: string[]
 }
 
 export interface RoomSessionActions {
@@ -166,6 +178,9 @@ export interface RoomSessionActions {
   backToLobby: () => void
   setChatDraft: (value: string) => void
   sendChatMessage: (messageText?: string) => void
+  kickParticipant: (targetParticipantId: string) => void
+  notifyTypingStart: () => void
+  notifyTypingStop: () => void
 }
 
 export interface RoomSocketClient {
@@ -177,6 +192,7 @@ export interface RoomSocketClient {
   onPeerLeft: (handler: (payload: PeerLeftPayload) => void) => void
   onHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) => void
   onNicknameUpdated: (handler: (payload: NicknameUpdatedPayload) => void) => void
+  onParticipantKicked: (handler: (payload: ParticipantKickedPayload) => void) => void
   onRoomDestroyed: (handler: (payload: RoomDestroyedPayload) => void) => void
   onError: (handler: (payload: SocketErrorPayload) => void) => void
   onSignalOffer: (handler: (payload: SignalOfferRelayPayload) => void) => void
@@ -190,6 +206,7 @@ export interface RoomSocketClient {
   offPeerLeft: (handler: (payload: PeerLeftPayload) => void) => void
   offHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) => void
   offNicknameUpdated: (handler: (payload: NicknameUpdatedPayload) => void) => void
+  offParticipantKicked: (handler: (payload: ParticipantKickedPayload) => void) => void
   offRoomDestroyed: (handler: (payload: RoomDestroyedPayload) => void) => void
   offError: (handler: (payload: SocketErrorPayload) => void) => void
   offSignalOffer: (handler: (payload: SignalOfferRelayPayload) => void) => void
@@ -199,6 +216,7 @@ export interface RoomSocketClient {
   emitJoinRoom: (payload: JoinRoomRequest) => void
   emitLeaveRoom: (payload: LeaveRoomRequest) => void
   emitResumeSession: (payload: ResumeSessionRequest) => void
+  emitKickParticipant: (payload: KickParticipantRequest) => void
   emitSignalOffer: (payload: SignalOfferRequest) => void
   emitSignalAnswer: (payload: SignalAnswerRequest) => void
   emitSignalIce: (payload: SignalIceRequest) => void

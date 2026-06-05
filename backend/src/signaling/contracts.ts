@@ -10,7 +10,8 @@ export const CLIENT_EVENTS = {
   signalIce: shared.CLIENT_EVENT_NAMES.SIGNAL_ICE,
   resumeSession: shared.CLIENT_EVENT_NAMES.RESUME_SESSION,
   nicknameUpdate: shared.CLIENT_EVENT_NAMES.NICKNAME_UPDATE,
-  roomPasswordUpdate: shared.CLIENT_EVENT_NAMES.ROOM_PASSWORD_UPDATE
+  roomPasswordUpdate: shared.CLIENT_EVENT_NAMES.ROOM_PASSWORD_UPDATE,
+  kickParticipant: shared.CLIENT_EVENT_NAMES.KICK_PARTICIPANT
 } as const;
 
 export const SERVER_EVENTS = {
@@ -25,6 +26,7 @@ export const SERVER_EVENTS = {
   hostReconnectGrace: shared.SERVER_EVENT_NAMES.HOST_RECONNECT_GRACE,
   roomPasswordUpdated: shared.SERVER_EVENT_NAMES.ROOM_PASSWORD_UPDATED,
   roomDestroyed: shared.SERVER_EVENT_NAMES.ROOM_DESTROYED,
+  participantKicked: shared.SERVER_EVENT_NAMES.PARTICIPANT_KICKED,
   error: shared.SERVER_EVENT_NAMES.ERROR
 } as const;
 
@@ -37,7 +39,8 @@ export const ERROR_CODES = {
   reconnectTokenStale: shared.SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE,
   passwordVersionMismatch: shared.SIGNALING_ERROR_CODES.PASSWORD_VERSION_MISMATCH,
   rateLimited: shared.SIGNALING_ERROR_CODES.RATE_LIMITED,
-  invalidSignalPayload: shared.SIGNALING_ERROR_CODES.INVALID_SIGNAL_PAYLOAD
+  invalidSignalPayload: shared.SIGNALING_ERROR_CODES.INVALID_SIGNAL_PAYLOAD,
+  notAuthorized: shared.SIGNALING_ERROR_CODES.NOT_AUTHORIZED
 } as const;
 
 export function makeSocketErrorPayload(code: SignalingErrorCode): SocketErrorPayload {
@@ -80,5 +83,7 @@ export type {
   RoomPasswordUpdatedPayload,
   NicknameUpdatePayload,
   NicknameUpdatedPayload,
+  KickParticipantPayload,
+  ParticipantKickedPayload,
   SocketErrorPayload
 } from "@shared";

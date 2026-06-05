@@ -39,6 +39,8 @@ export function createInitialRoomSessionState(): RoomSessionState {
     joinRateLimitUntil: null,
     joinRateLimitRoomId: null,
     participantNicknames: {},
+    hasPassword: false,
+    typingPeerIds: [],
   }
 }
 
@@ -72,6 +74,8 @@ export function withRoomCreated(state: RoomSessionState, payload: RoomCreatedPay
     participantNicknames: payload.participantNickname
       ? { [payload.participantId]: payload.participantNickname }
       : {},
+    hasPassword: payload.hasPassword ?? false,
+    typingPeerIds: [],
   }
 }
 
@@ -83,6 +87,15 @@ export function withRoomJoined(state: RoomSessionState, payload: RoomJoinedPaylo
 
   if (!hasParticipant(nextParticipants, payload.participantId)) {
     nextParticipants.push({ participantId: payload.participantId, isHost: payload.participantId === payload.hostId })
+  }
+
+  const participantNicknames: Record<string, string> = payload.participantNickname
+    ? { [payload.participantId]: payload.participantNickname }
+    : {}
+  for (const peer of payload.peers) {
+    if (peer.nickname) {
+      participantNicknames[peer.participantId] = peer.nickname
+    }
   }
 
   return {
@@ -104,9 +117,9 @@ export function withRoomJoined(state: RoomSessionState, payload: RoomJoinedPaylo
     copyFeedback: null,
     joinRateLimitUntil: null,
     joinRateLimitRoomId: null,
-    participantNicknames: payload.participantNickname
-      ? { [payload.participantId]: payload.participantNickname }
-      : {},
+    participantNicknames,
+    hasPassword: payload.hasPassword ?? false,
+    typingPeerIds: [],
   }
 }
 
@@ -115,11 +128,16 @@ export function withPeerJoined(state: RoomSessionState, payload: PeerJoinedPaylo
     ? state.participants
     : [...state.participants, { participantId: payload.participantId, isHost: false }]
 
+  const participantNicknames = payload.nickname
+    ? { ...state.participantNicknames, [payload.participantId]: payload.nickname }
+    : state.participantNicknames
+
   return {
     ...state,
     participants,
     participantCount: payload.participantCount,
     soloHostDeadlineAt: null,
+    participantNicknames,
   }
 }
 
@@ -264,6 +282,8 @@ export function withRoomEnded(state: RoomSessionState, reason?: string): RoomSes
     joinRateLimitUntil: null,
     joinRateLimitRoomId: null,
     participantNicknames: {},
+    hasPassword: false,
+    typingPeerIds: [],
   }
 }
 
@@ -292,6 +312,8 @@ export function resetToLobby(state: RoomSessionState): RoomSessionState {
     joinRateLimitUntil: null,
     joinRateLimitRoomId: null,
     participantNicknames: {},
+    hasPassword: false,
+    typingPeerIds: [],
   }
 }
 
@@ -326,4 +348,31 @@ export function withNicknameInput(state: RoomSessionState, nicknameInput: string
     ...state,
     nicknameInput,
   }
+}
+
+export function withParticipantKicked(state: RoomSessionState, participantId: string): RoomSessionState {
+  const participants = state.participants.filter((p) => p.participantId !== participantId)
+  return {
+    ...state,
+    participants,
+    participantCount: participants.length,
+  }
+}
+
+export function withKickedFromRoom(state: RoomSessionState): RoomSessionState {
+  return {
+    ...resetToLobby(state),
+    lobbyStatus: 'error',
+    errorMessage: UI_COPY.KICKED_FROM_ROOM,
+  }
+}
+
+export function withTypingStarted(state: RoomSessionState, participantId: string): RoomSessionState {
+  if (state.typingPeerIds.includes(participantId)) return state
+  return { ...state, typingPeerIds: [...state.typingPeerIds, participantId] }
+}
+
+export function withTypingStopped(state: RoomSessionState, participantId: string): RoomSessionState {
+  if (!state.typingPeerIds.includes(participantId)) return state
+  return { ...state, typingPeerIds: state.typingPeerIds.filter((id) => id !== participantId) }
 }

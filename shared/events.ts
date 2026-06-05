@@ -7,7 +7,8 @@ export const CLIENT_EVENT_NAMES = {
   SIGNAL_ANSWER: "signal_answer",
   SIGNAL_ICE: "signal_ice",
   RESUME_SESSION: "resume_session",
-  ROOM_PASSWORD_UPDATE: "room_password_update"
+  ROOM_PASSWORD_UPDATE: "room_password_update",
+  KICK_PARTICIPANT: "kick_participant"
 } as const;
 
 export const SERVER_EVENT_NAMES = {
@@ -22,6 +23,7 @@ export const SERVER_EVENT_NAMES = {
   HOST_RECONNECT_GRACE: "host_reconnect_grace",
   ROOM_PASSWORD_UPDATED: "room_password_updated",
   ROOM_DESTROYED: "room_destroyed",
+  PARTICIPANT_KICKED: "participant_kicked",
   ERROR: "error"
 } as const;
 

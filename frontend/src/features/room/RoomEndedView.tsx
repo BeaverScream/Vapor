@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 
@@ -6,7 +7,7 @@ interface RoomEndedViewProps {
   onBackToLobby: () => void
 }
 
-export function RoomEndedView({ message, onBackToLobby }: RoomEndedViewProps) {
+export const RoomEndedView = memo(function RoomEndedView({ message, onBackToLobby }: RoomEndedViewProps) {
   return (
     <Card className="relative z-10 w-full max-w-md border-white/30 bg-card/75 backdrop-blur-md">
       <CardHeader>
@@ -20,4 +21,4 @@ export function RoomEndedView({ message, onBackToLobby }: RoomEndedViewProps) {
       </CardContent>
     </Card>
   )
-}
+})

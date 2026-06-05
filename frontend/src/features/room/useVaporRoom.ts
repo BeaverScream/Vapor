@@ -13,6 +13,7 @@ import {
   resetToLobby,
   withCopyFeedback,
   withHostReconnectGrace,
+  withKickedFromRoom,
   withLobbyError,
   withLobbyMode,
   withLobbySubmitting,
@@ -20,6 +21,7 @@ import {
   withJoinRateLimited,
   withNicknameInput,
   withNicknameUpdated,
+  withParticipantKicked,
   withPasswordInput,
   withPeerJoined,
   withPeerLeft,
@@ -28,13 +30,17 @@ import {
   withRoomIdInput,
   withRoomJoined,
   withSocketState,
+  withTypingStarted,
+  withTypingStopped,
 } from './state-utils'
-import { VaporWebRtcChatMesh } from './webrtc-chat-mesh'
+import { VaporWebRtcChatMesh, type WebRtcTelemetryEvent } from './webrtc-chat-mesh'
 import {
   type ChatConnectionState,
   type ChatMessage,
   type HostReconnectGracePayload,
+  type LobbyMode,
   type NicknameUpdatedPayload,
+  type ParticipantKickedPayload,
   type PeerJoinedPayload,
   type PeerLeftPayload,
   type RoomCreatedPayload,
@@ -145,35 +151,41 @@ function getChatStatusText(
   return 'Preparing encrypted peer channels for chat…'
 }
 
-function getSoloWaitingText(soloHostDeadlineAt: number | null, nowMs: number): string | null {
-  if (!soloHostDeadlineAt) {
-    return null
-  }
-
-  const remainingMs = Math.max(soloHostDeadlineAt - nowMs, 0)
-  if (remainingMs <= 0) {
-    return null
-  }
-
-  const totalSeconds = Math.ceil(remainingMs / 1000)
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-
-  if (minutes >= 10) {
-    return `Solo room expires in ${minutes}m`
-  }
-
-  const paddedMinutes = minutes.toString().padStart(2, '0')
-  const paddedSeconds = seconds.toString().padStart(2, '0')
-  return `Solo room expires in ${paddedMinutes}:${paddedSeconds}`
-}
-
-function emitSafeWebRtcTelemetry(event: { kind: string; state: string; timestampMs: number }): void {
+function emitSafeWebRtcTelemetry(event: WebRtcTelemetryEvent): void {
   window.dispatchEvent(
     new CustomEvent('vapor:webrtc-state', {
       detail: event,
     }),
   )
+}
+
+export function getSoloWaitingText(soloHostDeadlineAt: number | null, nowMs: number): string | null {
+  if (!soloHostDeadlineAt) return null
+  const remainingMs = Math.max(soloHostDeadlineAt - nowMs, 0)
+  if (remainingMs <= 0) return null
+  const totalSeconds = Math.ceil(remainingMs / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  const countdown =
+    minutes >= 10
+      ? `${minutes}m`
+      : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  return `${UI_COPY.SOLO_HOST_WARNING} ${countdown}`
+}
+
+export function getLifetimeText(expiresAt: number | null, nowMs: number): string | null {
+  if (!expiresAt) return null
+  const remainingMs = Math.max(expiresAt - nowMs, 0)
+  if (remainingMs <= 0) return null
+  const totalSeconds = Math.floor(remainingMs / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes >= 10) {
+    return `Ends in ${minutes}m`
+  }
+  const paddedMinutes = minutes.toString().padStart(2, '0')
+  const paddedSeconds = seconds.toString().padStart(2, '0')
+  return `Ends in ${paddedMinutes}:${paddedSeconds}`
 }
 
 interface UseVaporRoomDependencies {
@@ -191,10 +203,9 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     joinRateLimitHint: string | null
     roomStatus: string
     connectionText: string
-    soloWaitingText: string | null
-    soloWaitingChipText: string | null
+    expiresAt: number | null
+    soloHostDeadlineAt: number | null
     chatStatusText: string
-    roomLifetimeText: string | null
   }
 } {
   const {
@@ -205,10 +216,11 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   const createSocketClientRef = useRef(createSocketClient)
   createSocketClientRef.current = createSocketClient
 
+  const writeClipboardTextRef = useRef(writeClipboardText)
+  writeClipboardTextRef.current = writeClipboardText
+
   const [state, setState] = useState<RoomSessionState>(createInitialRoomSessionState)
   const [rateLimitTick, setRateLimitTick] = useState<number>(() => Date.now())
-  const [lifetimeTick, setLifetimeTick] = useState<number>(() => Date.now())
-  const [isInputFocused, setIsInputFocused] = useState(false)
   const socketRef = useRef<RoomSocketClient | null>(null)
   const peerMeshRef = useRef<VaporWebRtcChatMesh | null>(null)
   const resumeInFlightRef = useRef(false)
@@ -216,6 +228,12 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   const socketStateRef = useRef<RoomSessionState['socketState']>('connecting')
   const pendingMessagesRef = useRef<string[]>([])
   const flushPendingRef = useRef<(() => void) | null>(null)
+  const typingDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const typingSafetyTimeoutsRef = useRef<Map<string, ReturnType<typeof window.setTimeout>>>(new Map())
+
+  // Always-current snapshot used by stable callbacks to avoid stale closures.
+  const stateRef = useRef(state)
+  stateRef.current = state
 
   socketStateRef.current = state.socketState
 
@@ -245,6 +263,26 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
         onRemoteMessage: (fromParticipantId, text) => {
           setState((previous) => withAppendedChatMessage(previous, createChatMessage(fromParticipantId, text, 'incoming')))
         },
+        onRemoteTypingStatus: (fromParticipantId, isTyping) => {
+          const safetyTimeouts = typingSafetyTimeoutsRef.current
+          if (isTyping) {
+            const existing = safetyTimeouts.get(fromParticipantId)
+            if (existing !== undefined) window.clearTimeout(existing)
+            const handle = window.setTimeout(() => {
+              safetyTimeouts.delete(fromParticipantId)
+              setState((prev) => withTypingStopped(prev, fromParticipantId))
+            }, 5000)
+            safetyTimeouts.set(fromParticipantId, handle)
+            setState((prev) => withTypingStarted(prev, fromParticipantId))
+          } else {
+            const existing = safetyTimeouts.get(fromParticipantId)
+            if (existing !== undefined) {
+              window.clearTimeout(existing)
+              safetyTimeouts.delete(fromParticipantId)
+            }
+            setState((prev) => withTypingStopped(prev, fromParticipantId))
+          }
+        },
         onConnectedPeerCountChange: (connectedPeerCount) => {
           setState((previous) => {
             let nextState = withConnectedPeerCount(previous, connectedPeerCount)
@@ -268,6 +306,13 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     [disposePeerMesh],
   )
 
+  // Stable setter callbacks — use functional state updaters so deps are empty.
+  const setLobbyMode = useCallback((mode: LobbyMode) => setState((prev) => withLobbyMode(prev, mode)), [])
+  const setRoomIdInput = useCallback((value: string) => setState((prev) => withRoomIdInput(prev, value)), [])
+  const setPasswordInput = useCallback((value: string) => setState((prev) => withPasswordInput(prev, value)), [])
+  const setNicknameInput = useCallback((value: string) => setState((prev) => withNicknameInput(prev, value)), [])
+  const setChatDraft = useCallback((value: string) => setState((prev) => withChatDraft(prev, value)), [])
+
   const joinRateLimitRemainingMs = useMemo(() => {
     if (!state.joinRateLimitUntil) {
       return 0
@@ -275,32 +320,6 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
 
     return Math.max(state.joinRateLimitUntil - rateLimitTick, 0)
   }, [state.joinRateLimitUntil, rateLimitTick])
-
-  const roomLifetimeRemainingMs = useMemo(() => {
-    if (!state.expiresAt) {
-      return 0
-    }
-
-    return Math.max(state.expiresAt - lifetimeTick, 0)
-  }, [state.expiresAt, lifetimeTick])
-
-  const roomLifetimeText = useMemo(() => {
-    if (roomLifetimeRemainingMs <= 0) {
-      return null
-    }
-
-    const totalSeconds = Math.floor(roomLifetimeRemainingMs / 1000)
-    const minutes = Math.floor(totalSeconds / 60)
-    const seconds = totalSeconds % 60
-
-    if (minutes >= 10) {
-      return `Ends in ${minutes}m`
-    }
-
-    const paddedMinutes = minutes.toString().padStart(2, '0')
-    const paddedSeconds = seconds.toString().padStart(2, '0')
-    return `Ends in ${paddedMinutes}:${paddedSeconds}`
-  }, [roomLifetimeRemainingMs])
 
   const isJoinRateLimited =
     state.lobbyMode === 'join' &&
@@ -372,6 +391,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
         let nextState = withPeerLeft(previous, payload)
 
         if (nextState.participantCount <= 1) {
+          pendingMessagesRef.current = []
           nextState = withConnectedPeerCount(nextState, 0)
           nextState = withChatConnectionState(nextState, 'idle')
           return nextState
@@ -398,7 +418,39 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     }
 
     const onNicknameUpdated = (payload: NicknameUpdatedPayload): void => {
-      setState((previous) => withNicknameUpdated(previous, payload))
+      setState((previous) => {
+        const isLocalUser = previous.participantId === payload.participantId
+        const oldName = previous.participantNicknames[payload.participantId] ?? payload.participantId
+        const actor = isLocalUser ? 'You' : oldName
+        const verb = isLocalUser ? 'your' : 'their'
+        const systemMessage = createChatMessage(
+          payload.participantId,
+          `${actor} changed ${verb} name to "${payload.nickname}"`,
+          'system',
+        )
+        return withAppendedChatMessage(withNicknameUpdated(previous, payload), systemMessage)
+      })
+    }
+
+    const onParticipantKicked = (payload: ParticipantKickedPayload): void => {
+      if (payload.participantId === stateRef.current.participantId) {
+        disposePeerMesh()
+        clearStoredReconnectSession()
+        resumeInFlightRef.current = false
+        autoResumeRequestedRef.current = false
+        pendingMessagesRef.current = []
+        flushPendingRef.current = null
+        if (typingDebounceRef.current !== null) {
+          window.clearTimeout(typingDebounceRef.current)
+          typingDebounceRef.current = null
+        }
+        for (const handle of typingSafetyTimeoutsRef.current.values()) window.clearTimeout(handle)
+        typingSafetyTimeoutsRef.current.clear()
+        setState((previous) => withKickedFromRoom(previous))
+      } else {
+        peerMeshRef.current?.handlePeerLeft(payload.participantId)
+        setState((previous) => withParticipantKicked(previous, payload.participantId))
+      }
     }
 
     const onHostReconnectGrace = (payload: HostReconnectGracePayload): void => {
@@ -414,6 +466,12 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       if (flushPendingRef.current) {
         flushPendingRef.current = null
       }
+      if (typingDebounceRef.current !== null) {
+        window.clearTimeout(typingDebounceRef.current)
+        typingDebounceRef.current = null
+      }
+      for (const handle of typingSafetyTimeoutsRef.current.values()) window.clearTimeout(handle)
+      typingSafetyTimeoutsRef.current.clear()
       setState((previous) => withRoomEnded(previous, payload.reason))
     }
 
@@ -444,6 +502,10 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
           )
         }
 
+        if (errorCode === SIGNALING_ERROR_CODES.INVALID_PASSWORD && previous.lobbyMode === 'join') {
+          return { ...withLobbyError(previous, getErrorMessage(errorCode)), hasPassword: true }
+        }
+
         return withLobbyError(previous, getErrorMessage(errorCode))
       })
     }
@@ -458,6 +520,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     socket.onSignalAnswer(onSignalAnswer)
     socket.onSignalIce(onSignalIce)
     socket.onNicknameUpdated(onNicknameUpdated)
+    socket.onParticipantKicked(onParticipantKicked)
     socket.onHostReconnectGrace(onHostReconnectGrace)
     socket.onRoomDestroyed(onRoomDestroyed)
     socket.onError(onError)
@@ -473,6 +536,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       socket.offSignalAnswer(onSignalAnswer)
       socket.offSignalIce(onSignalIce)
       socket.offNicknameUpdated(onNicknameUpdated)
+      socket.offParticipantKicked(onParticipantKicked)
       socket.offHostReconnectGrace(onHostReconnectGrace)
       socket.offRoomDestroyed(onRoomDestroyed)
       socket.offError(onError)
@@ -520,47 +584,18 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     }
   }, [state.copyFeedback])
 
-  useEffect(() => {
-    if (!state.expiresAt || state.screen !== 'room') {
-      return
-    }
+  const submitLobby = useCallback((): void => {
+    const state = stateRef.current
+    const now = Date.now()
+    const rateLimitRemainingMs = state.joinRateLimitUntil ? Math.max(state.joinRateLimitUntil - now, 0) : 0
+    const rateLimited =
+      state.lobbyMode === 'join' &&
+      state.joinRateLimitRoomId !== null &&
+      state.joinRateLimitRoomId === state.roomIdInput &&
+      rateLimitRemainingMs > 0
 
-    const intervalHandle = window.setInterval(() => {
-      setLifetimeTick(Date.now())
-    }, 1000)
-
-    return () => {
-      window.clearInterval(intervalHandle)
-    }
-  }, [state.expiresAt, state.screen])
-
-  useEffect(() => {
-    const onFocusIn = (event: FocusEvent) => {
-      const target = event.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-        setIsInputFocused(true)
-      }
-    }
-
-    const onFocusOut = (event: FocusEvent) => {
-      const target = event.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-        setIsInputFocused(false)
-      }
-    }
-
-    document.addEventListener('focusin', onFocusIn)
-    document.addEventListener('focusout', onFocusOut)
-
-    return () => {
-      document.removeEventListener('focusin', onFocusIn)
-      document.removeEventListener('focusout', onFocusOut)
-    }
-  }, [])
-
-  const submitLobby = (): void => {
-    if (isJoinRateLimited) {
-      setState((previous) => withLobbyError(previous, getJoinRateLimitedMessage(joinRateLimitRemainingMs)))
+    if (rateLimited) {
+      setState((previous) => withLobbyError(previous, getJoinRateLimitedMessage(rateLimitRemainingMs)))
       return
     }
 
@@ -575,15 +610,17 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       return
     }
 
-    if (state.passwordInput.trim().length === 0) {
-      setState((previous) => withLobbyError(previous, getErrorMessage(SIGNALING_ERROR_CODES.INVALID_PASSWORD)))
-      return
-    }
-
     const trimmedNickname = state.nicknameInput.trim()
     if (trimmedNickname.length < 3) {
       setState((previous) => withLobbyError(previous, UI_COPY.INVALID_NICKNAME))
       return
+    }
+
+    if (state.lobbyMode === 'join' && state.hasPassword) {
+      if (state.passwordInput.trim().length === 0) {
+        setState((previous) => withLobbyError(previous, getErrorMessage(SIGNALING_ERROR_CODES.INVALID_PASSWORD)))
+        return
+      }
     }
 
     setState((previous) => withLobbySubmitting(previous))
@@ -594,20 +631,18 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     }
 
     socket.emitJoinRoom({ roomId: state.roomIdInput, password: state.passwordInput, nickname: trimmedNickname })
-  }
+  }, [])
 
-  const copyRoomId = async (): Promise<void> => {
-    if (!state.activeRoomId) {
-      return
-    }
-
+  const copyRoomId = useCallback(async (): Promise<void> => {
+    const roomId = stateRef.current.activeRoomId
+    if (!roomId) return
     try {
-      await writeClipboardText(state.activeRoomId)
+      await writeClipboardTextRef.current(roomId)
       setState((previous) => withCopyFeedback(previous, 'Copied'))
     } catch {
       setState((previous) => withCopyFeedback(previous, 'Copy unavailable'))
     }
-  }
+  }, [])
 
   const flushPendingMessages = useCallback((): void => {
     if (pendingMessagesRef.current.length === 0) {
@@ -626,12 +661,12 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     }
   }, [])
 
-  const leaveRoom = (): void => {
+  const leaveRoom = useCallback((): void => {
     const socket = socketRef.current
-    if (socket && state.activeRoomId) {
-      socket.emitLeaveRoom({ roomId: state.activeRoomId })
+    const roomId = stateRef.current.activeRoomId
+    if (socket && roomId) {
+      socket.emitLeaveRoom({ roomId })
     }
-
     disposePeerMesh()
     clearStoredReconnectSession()
     resumeInFlightRef.current = false
@@ -640,10 +675,16 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     if (flushPendingRef.current) {
       flushPendingRef.current = null
     }
+    if (typingDebounceRef.current !== null) {
+      window.clearTimeout(typingDebounceRef.current)
+      typingDebounceRef.current = null
+    }
+    for (const handle of typingSafetyTimeoutsRef.current.values()) window.clearTimeout(handle)
+    typingSafetyTimeoutsRef.current.clear()
     setState((previous) => resetToLobby(previous))
-  }
+  }, [disposePeerMesh])
 
-  const backToLobby = (): void => {
+  const backToLobby = useCallback((): void => {
     disposePeerMesh()
     clearStoredReconnectSession()
     resumeInFlightRef.current = false
@@ -652,20 +693,60 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     if (flushPendingRef.current) {
       flushPendingRef.current = null
     }
+    if (typingDebounceRef.current !== null) {
+      window.clearTimeout(typingDebounceRef.current)
+      typingDebounceRef.current = null
+    }
+    for (const handle of typingSafetyTimeoutsRef.current.values()) window.clearTimeout(handle)
+    typingSafetyTimeoutsRef.current.clear()
     setState((previous) => resetToLobby(previous))
-  }
+  }, [disposePeerMesh])
 
-  const sendChatMessage = (messageText?: string): void => {
-    if (!state.participantId) {
-      return
+  const kickParticipant = useCallback((targetParticipantId: string): void => {
+    const socket = socketRef.current
+    const roomId = stateRef.current.activeRoomId
+    if (!socket || !roomId) return
+    socket.emitKickParticipant({ roomId, targetParticipantId })
+  }, [])
+
+  const notifyTypingStart = useCallback((): void => {
+    const mesh = peerMeshRef.current
+    if (!mesh) return
+    const isAlreadyTyping = typingDebounceRef.current !== null
+    if (typingDebounceRef.current !== null) {
+      window.clearTimeout(typingDebounceRef.current)
     }
-
-    const trimmedMessage = (messageText ?? state.chatDraft).trim()
-    if (trimmedMessage.length === 0) {
-      return
+    if (!isAlreadyTyping) {
+      mesh.sendTypingStart()
     }
+    typingDebounceRef.current = window.setTimeout(() => {
+      typingDebounceRef.current = null
+      peerMeshRef.current?.sendTypingStop()
+    }, 3000)
+  }, [])
 
-    const outgoingMessage = createChatMessage(state.participantId, trimmedMessage, 'outgoing')
+  const notifyTypingStop = useCallback((): void => {
+    if (typingDebounceRef.current !== null) {
+      window.clearTimeout(typingDebounceRef.current)
+      typingDebounceRef.current = null
+    }
+    peerMeshRef.current?.sendTypingStop()
+  }, [])
+
+  const sendChatMessage = useCallback((messageText?: string): void => {
+    const s = stateRef.current
+    if (!s.participantId) return
+
+    const trimmedMessage = (messageText ?? s.chatDraft).trim()
+    if (trimmedMessage.length === 0) return
+
+    if (typingDebounceRef.current !== null) {
+      window.clearTimeout(typingDebounceRef.current)
+      typingDebounceRef.current = null
+    }
+    peerMeshRef.current?.sendTypingStop()
+
+    const outgoingMessage = createChatMessage(s.participantId, trimmedMessage, 'outgoing')
 
     setState((previous) => {
       let nextState = withAppendedChatMessage(previous, outgoingMessage)
@@ -673,17 +754,19 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       return nextState
     })
 
-    pendingMessagesRef.current.push(trimmedMessage)
+    if (s.participantCount > 1) {
+      pendingMessagesRef.current.push(trimmedMessage)
 
-    if (flushPendingRef.current) {
-      flushPendingRef.current()
-    } else {
-      flushPendingRef.current = () => {
-        flushPendingMessages()
+      if (flushPendingRef.current) {
+        flushPendingRef.current()
+      } else {
+        flushPendingRef.current = () => {
+          flushPendingMessages()
+        }
+        queueMicrotask(flushPendingRef.current)
       }
-      queueMicrotask(flushPendingRef.current)
     }
-  }
+  }, [flushPendingMessages])
 
   const primaryActionLabel = state.lobbyMode === 'create' ? 'Create room' : 'Join room'
   const isPrimaryDisabled = state.lobbyStatus === 'submitting' || isJoinRateLimited
@@ -697,29 +780,29 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     () => getChatStatusText(state.chatConnectionState, state.connectedPeerCount, state.participantCount),
     [state.chatConnectionState, state.connectedPeerCount, state.participantCount],
   )
-  const soloWaitingText = useMemo(
-    () => getSoloWaitingText(state.soloHostDeadlineAt, lifetimeTick),
-    [state.soloHostDeadlineAt, lifetimeTick],
-  )
-  const soloWaitingChipText = useMemo(
-    () => (soloWaitingText ? `${UI_COPY.SOLO_HOST_WARNING} ${soloWaitingText.replace('Solo room expires in ', '')}` : null),
-    [soloWaitingText],
+
+  const actions = useMemo<RoomSessionActions>(
+    () => ({
+      setLobbyMode,
+      setRoomIdInput,
+      setPasswordInput,
+      setNicknameInput,
+      submitLobby,
+      copyRoomId,
+      setChatDraft,
+      sendChatMessage,
+      leaveRoom,
+      backToLobby,
+      kickParticipant,
+      notifyTypingStart,
+      notifyTypingStop,
+    }),
+    [setLobbyMode, setRoomIdInput, setPasswordInput, setNicknameInput, submitLobby, copyRoomId, setChatDraft, sendChatMessage, leaveRoom, backToLobby, kickParticipant, notifyTypingStart, notifyTypingStop],
   )
 
   return {
     state,
-    actions: {
-      setLobbyMode: (mode) => setState((previous) => withLobbyMode(previous, mode)),
-      setRoomIdInput: (value: string) => setState((previous) => withRoomIdInput(previous, value)),
-      setPasswordInput: (value: string) => setState((previous) => withPasswordInput(previous, value)),
-      setNicknameInput: (value: string) => setState((previous) => withNicknameInput(previous, value)),
-      submitLobby,
-      copyRoomId,
-      setChatDraft: (value: string) => setState((previous) => withChatDraft(previous, value)),
-      sendChatMessage,
-      leaveRoom,
-      backToLobby,
-    },
+    actions,
     derived: {
       lobbyMode: state.lobbyMode,
       primaryActionLabel,
@@ -727,10 +810,9 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       joinRateLimitHint,
       roomStatus,
       connectionText,
-      soloWaitingText,
-      soloWaitingChipText,
+      expiresAt: state.expiresAt,
+      soloHostDeadlineAt: state.soloHostDeadlineAt,
       chatStatusText,
-      roomLifetimeText: isInputFocused ? null : roomLifetimeText,
     },
   }
 }

@@ -330,6 +330,80 @@ test('T3.3-04 (P3-AB-004): lifecycle edge case contract coverage — TTL expiry,
   expectContains(handlers, 'CREATE_ROOM_BURST_THRESHOLD', 'Burst threshold constant gates the blocklist trigger')
 })
 
+// ---- VP-4.1 Identity & UX Refinement ----
+
+test('T4.1-03: UI correctly renders local user nickname from participantNickname payload', async () => {
+  const stateUtils = await readFile(stateUtilsFile, 'utf8')
+  const roomView = await readFile(roomViewFile, 'utf8')
+  const sharedPayloads = await readFile(sharedPayloadsFile, 'utf8')
+
+  // participantNickname must be declared in RoomCreatedPayload and RoomJoinedPayload
+  expectContains(sharedPayloads, 'participantNickname?: string | null', 'participantNickname field declared in shared payload types')
+
+  // withRoomCreated and withRoomJoined must seed the local user's own nickname from participantNickname
+  expectContains(stateUtils, '{ [payload.participantId]: payload.participantNickname }', 'local user nickname keyed by participantId in participantNicknames map')
+
+  // withRoomJoined must also seed peer nicknames from the peers array so the roster shows names immediately on join
+  expectContains(stateUtils, 'peer.nickname', 'peer nicknames from payload.peers seeded into participantNicknames in withRoomJoined')
+
+  // withPeerJoined must seed the joining peer's nickname from the peer_joined payload
+  expectContains(stateUtils, 'payload.nickname', 'incoming peer nickname seeded into participantNicknames in withPeerJoined')
+
+  // RoomView must render the local user with their nickname using the participantNicknames map
+  expectContains(roomView, "You (", 'You (nickname) display pattern present in RoomView for local user identity')
+  expectContains(roomView, 'participantNicknames[participantId]', 'participantNicknames map used to look up local user nickname in RoomView')
+})
+
+// ---- VP-4.2 Performance & Observability ----
+
+test('T4.2-01: 1s countdown timers are isolated to memoized child components so RoomView does not re-render every second', async () => {
+  const roomView = await readFile(roomViewFile, 'utf8')
+
+  // Both countdown timer components must be defined as standalone memo-wrapped functions,
+  // not inline within RoomView. The interval lives inside the child, not the parent.
+  expectContains(roomView, 'const SoloWaitingChip = memo(function SoloWaitingChip', 'SoloWaitingChip is a standalone memo-wrapped component')
+  expectContains(roomView, 'const RoomLifetimeChip = memo(function RoomLifetimeChip', 'RoomLifetimeChip is a standalone memo-wrapped component')
+
+  // Each timer component owns its own nowMs state — the interval update only re-renders the chip, not RoomView
+  expectContains(roomView, 'const [nowMs, setNowMs] = useState(() => Date.now())', 'timer child components own their own nowMs state')
+
+  // The setInterval calls must live inside these child components, not at the RoomView level
+  expectContains(roomView, 'const id = window.setInterval(() => setNowMs(Date.now()), 1000)', '1s interval drives only the chip component state')
+
+  // RoomView itself is memoized so parent state changes do not force unnecessary re-renders
+  expectContains(roomView, 'export const RoomView = memo(function RoomView', 'RoomView is wrapped with React.memo')
+})
+
+test('T4.2-02: DiagnosticsOverlay is wired to vapor:socket-latency and vapor:webrtc-state custom events for accurate telemetry', async () => {
+  const roomView = await readFile(roomViewFile, 'utf8')
+  const socketClient = await readFile(roomSocketClientFile, 'utf8')
+  const useRoom = await readFile(useRoomFile, 'utf8')
+
+  // DiagnosticsOverlay must exist as an isolated memo component
+  expectContains(roomView, 'const DiagnosticsOverlay = memo(function DiagnosticsOverlay', 'DiagnosticsOverlay is a standalone memo-wrapped component')
+
+  // Overlay subscribes to the socket latency custom event to display round-trip time
+  expectContains(roomView, "window.addEventListener('vapor:socket-latency', onLatency)", 'DiagnosticsOverlay subscribes to vapor:socket-latency for socket RTT')
+  expectContains(roomView, "window.removeEventListener('vapor:socket-latency', onLatency)", 'DiagnosticsOverlay unsubscribes from vapor:socket-latency on unmount')
+
+  // Overlay subscribes to the WebRTC state custom event for per-peer diagnostics
+  expectContains(roomView, "window.addEventListener('vapor:webrtc-state', onWebRtcState)", 'DiagnosticsOverlay subscribes to vapor:webrtc-state for peer diagnostics')
+  expectContains(roomView, "window.removeEventListener('vapor:webrtc-state', onWebRtcState)", 'DiagnosticsOverlay unsubscribes from vapor:webrtc-state on unmount')
+
+  // Overlay handles all three telemetry event kinds emitted by the WebRTC mesh
+  expectContains(roomView, "detail.kind === 'peer_connection_state'", 'DiagnosticsOverlay handles peer_connection_state telemetry kind')
+  expectContains(roomView, "detail.kind === 'data_channel_state'", 'DiagnosticsOverlay handles data_channel_state telemetry kind')
+  expectContains(roomView, "detail.kind === 'bitrate_stats'", 'DiagnosticsOverlay handles bitrate_stats telemetry kind')
+
+  // Socket client dispatches the latency event on the socket.io pong measurement
+  expectContains(socketClient, "socket.io.on('pong'", 'socket client measures latency via socket.io pong callback')
+  expectContains(socketClient, "window.dispatchEvent(new CustomEvent('vapor:socket-latency', { detail: { latencyMs } }))", 'socket client dispatches vapor:socket-latency on pong with latencyMs payload')
+
+  // useVaporRoom routes WebRTC telemetry through the safe window event dispatcher
+  expectContains(useRoom, "new CustomEvent('vapor:webrtc-state'", 'useVaporRoom dispatches vapor:webrtc-state custom events for telemetry')
+  expectContains(useRoom, 'emitSafeWebRtcTelemetry', 'emitSafeWebRtcTelemetry helper wires WebRTC mesh telemetry to the window event bus')
+})
+
 // ---- VP-3.1 Security & Housekeeping ----
 test('T3.1-05 (P3-SH-005): per-room lock serializes password updates and resume-session validation', async () => {
   const handlers = await readFile(registerSocketHandlersFile, 'utf8')

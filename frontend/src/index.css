@@ -60,19 +60,7 @@
 }
 
 .vapor-smoke-layer {
-  position: absolute;
-  inset: -24%;
-  pointer-events: none;
-  opacity: 0.9;
-  isolation: isolate;
-  mix-blend-mode: screen;
-  transform: translate3d(0, 0, 0);
-  filter: blur(22px);
-  background:
-    radial-gradient(40% 30% at 16% 76%, rgba(176, 198, 232, 0.3), transparent 72%),
-    radial-gradient(38% 28% at 84% 74%, rgba(170, 194, 231, 0.28), transparent 72%),
-    radial-gradient(30% 22% at 52% 44%, rgba(143, 168, 207, 0.2), transparent 70%);
-  animation: vapor-smoke-drift 22s ease-in-out infinite alternate;
+  display: none;
 }
 
 .vapor-smoke-layer::before,
@@ -150,6 +138,14 @@
     opacity: 0.08;
     transform: translate3d(3%, -14%, 0) scale(1.14);
   }
+}
+
+/* Pause smoke animations while typing — mix-blend-mode prevents layer isolation,
+   so the animations force full-page compositing at 60fps which delays input repaints. */
+main:has(input:focus, textarea:focus) .vapor-smoke-layer,
+main:has(input:focus, textarea:focus) .vapor-smoke-layer::before,
+main:has(input:focus, textarea:focus) .vapor-smoke-layer::after {
+  animation-play-state: paused;
 }
 
 .vapor-scroll {
