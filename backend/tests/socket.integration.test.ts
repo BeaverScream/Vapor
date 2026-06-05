@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createVaporServer } from "../src/server";
 import { CLIENT_EVENTS, GUEST_DISCONNECT_GRACE_MS, HOST_DISCONNECT_GRACE_MS, JOIN_INVALID_ATTEMPT_COOLDOWN_MS, JOIN_INVALID_ATTEMPT_NO_COOLDOWN_MAX, NICKNAME_CHANGE_COOLDOWN_MS, SERVER_EVENTS, SOLO_HOST_ROOM_TIMEOUT_MS } from "../src/signaling/contracts";
 import { registerSocketHandlers } from "../src/signaling/registerSocketHandlers";
-import { createPhase0State, getPhase0StateSnapshot } from "../src/signaling/state";
+import { createSignalingState, getSignalingStateSnapshot } from "../src/signaling/state";
 
 type EventPayload = unknown;
 type EventHandler = (payload: EventPayload) => void;
@@ -165,7 +165,7 @@ function setupSocketHarness(overrides?: {
   sweepIntervalMs?: number;
 }) {
   const io = new FakeIo();
-  const state = createPhase0State();
+  const state = createSignalingState();
 
   const metrics = {
     recordConnection: () => undefined,
@@ -199,7 +199,7 @@ function setupSocketHarness(overrides?: {
     io,
     state,
     hooks: {
-      getStateSnapshot: () => getPhase0StateSnapshot(state),
+      getStateSnapshot: () => getSignalingStateSnapshot(state),
       getParticipantRecord: (roomId: string, participantId: string) =>
         state.rooms.get(roomId)?.participants.get(participantId)
     }

@@ -8,7 +8,7 @@ import {
   removeParticipantBySocket,
   type RoomIdentityFactories
 } from "../src/signaling/roomLifecycle";
-import { createPhase0State } from "../src/signaling/state";
+import { createSignalingState } from "../src/signaling/state";
 
 function createFactories(roomIds: string[]): RoomIdentityFactories {
   let roomIndex = 0;
@@ -29,7 +29,7 @@ function createFactories(roomIds: string[]): RoomIdentityFactories {
 }
 
 test("T0.1-01: createRoomRecord enforces unique room id when factory collides", () => {
-  const state = createPhase0State();
+  const state = createSignalingState();
   const factories = createFactories(["ABCD12", "ABCD12", "ZXCV98"]);
 
   const first = createRoomRecord(state, "socket-a", 100, factories);
@@ -41,7 +41,7 @@ test("T0.1-01: createRoomRecord enforces unique room id when factory collides", 
 });
 
 test("T0.1-02: joinRoomRecord returns null when room does not exist", () => {
-  const state = createPhase0State();
+  const state = createSignalingState();
 
   const joined = joinRoomRecord(state, "MISSING", "socket-a", 123, () => "P-1");
 
@@ -52,7 +52,7 @@ test("T0.1-02: joinRoomRecord returns null when room does not exist", () => {
 });
 
 test("T0.2-01: removeParticipantBySocket returns null for unknown socket", () => {
-  const state = createPhase0State();
+  const state = createSignalingState();
 
   const removed = removeParticipantBySocket(state, "unknown-socket");
 
@@ -60,7 +60,7 @@ test("T0.2-01: removeParticipantBySocket returns null for unknown socket", () =>
 });
 
 test("T0.2-02: host removal atomically purges participant/socket indexes", () => {
-  const state = createPhase0State();
+  const state = createSignalingState();
   const factories = createFactories(["ROOM01"]);
 
   const host = createRoomRecord(state, "socket-host", 10, factories);
@@ -83,7 +83,7 @@ test("T0.2-02: host removal atomically purges participant/socket indexes", () =>
 });
 
 test("T0.2-03: removing last guest destroys now-empty room", () => {
-  const state = createPhase0State();
+  const state = createSignalingState();
   const factories = createFactories(["ROOM02"]);
 
   const host = createRoomRecord(state, "socket-host", 10, factories);

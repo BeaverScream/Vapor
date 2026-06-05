@@ -6,7 +6,7 @@ import { instrument } from "@socket.io/admin-ui";
 import { createMetricsRegistry } from "./admin/metricsRegistry";
 import { createAdminRouter } from "./admin/createAdminRouter";
 import { generateToken } from "./signaling/backendUtils";
-import { createPhase0State, getPhase0StateSnapshot, resetPhase0State } from "./signaling/state";
+import { createSignalingState, getSignalingStateSnapshot, resetSignalingState } from "./signaling/state";
 import { registerSocketHandlers } from "./signaling/registerSocketHandlers";
 import type { RoomIdentityFactories } from "./signaling/roomLifecycle";
 
@@ -36,7 +36,7 @@ export function createVaporServer({
   const app = express();
   const httpServer = createServer(app as any);
   const metrics = createMetricsRegistry();
-  const state = createPhase0State();
+  const state = createSignalingState();
   const factories: RoomIdentityFactories = {
     generateRoomId,
     generateParticipantId
@@ -96,8 +96,8 @@ export function createVaporServer({
     io,
     state,
     testHooks: {
-      getStateSnapshot: () => getPhase0StateSnapshot(state),
-      resetState: () => resetPhase0State(state)
+      getStateSnapshot: () => getSignalingStateSnapshot(state),
+      resetState: () => resetSignalingState(state)
     },
     start: () =>
       new Promise<void>((resolve) => {

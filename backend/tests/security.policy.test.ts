@@ -7,6 +7,7 @@ import path from "node:path";
 const BACKEND_SRC_ROOT = path.resolve(process.cwd(), "src");
 const SIGNALING_CONTRACTS_FILE = path.resolve(process.cwd(), "src/signaling/contracts.ts");
 const SOCKET_HANDLERS_FILE = path.resolve(process.cwd(), "src/signaling/registerSocketHandlers.ts");
+const RATE_LIMITING_FILE = path.resolve(process.cwd(), "src/signaling/handlers/rateLimiting.ts");
 const SHARED_EVENTS_FILE = path.resolve(process.cwd(), "../shared/events.ts");
 const SHARED_PAYLOADS_FILE = path.resolve(process.cwd(), "../shared/payloads.ts");
 const SHARED_REASONS_FILE = path.resolve(process.cwd(), "../shared/reasons.ts");
@@ -218,74 +219,75 @@ test("T1.6-01: lifecycle uses grace + precedence primitives", async () => {
 
 // ---- T3.3 Ops, Abuse Controls ----
 test("T3.3-01 (P3-AB-001): temporary blocklist behavior stays RAM-only", async () => {
-  const handlers = await fs.readFile(SOCKET_HANDLERS_FILE, "utf8");
+  const rateLimiting = await fs.readFile(RATE_LIMITING_FILE, "utf8");
 
   // Blocklist and companion create-attempt tracking are both local Maps — no external store
   expectContains(
-    handlers,
-    "const temporaryBlocklistBySubject = new Map",
-    "blocklist declared as local in-memory Map"
+    rateLimiting,
+    "temporaryBlocklistBySubject: new Map()",
+    "blocklist declared as in-memory Map inside context factory"
   );
   expectContains(
-    handlers,
-    "const createAttemptsBySubject = new Map",
-    "create-attempt counter declared as local in-memory Map"
+    rateLimiting,
+    "createAttemptsBySubject: new Map()",
+    "create-attempt counter declared as in-memory Map inside context factory"
   );
 
   // Block expiry is a numeric TTL computed from CREATE_ROOM_BLOCK_DURATION_MS — time-bounded, not permanent
   expectContains(
-    handlers,
-    "temporaryBlocklistBySubject.set(subject, createdAt + CREATE_ROOM_BLOCK_DURATION_MS)",
+    rateLimiting,
+    "ctx.temporaryBlocklistBySubject.set(subject, nowTs + CREATE_ROOM_BLOCK_DURATION_MS)",
     "block entry stores a computed expiry timestamp, not a permanent flag"
   );
 
   // Sweeper prunes expired blocklist entries so no durable state accumulates
   expectContains(
-    handlers,
-    "temporaryBlocklistBySubject.delete(subject)",
+    rateLimiting,
+    "ctx.temporaryBlocklistBySubject.delete(subject)",
     "sweeper prunes expired blocklist entries"
   );
 
   // Sweeper also prunes expired create-attempt windows
   expectContains(
-    handlers,
-    "createAttemptsBySubject.delete(subject)",
+    rateLimiting,
+    "ctx.createAttemptsBySubject.delete(subject)",
     "sweeper prunes expired create-attempt windows"
   );
 
-  // Neither state structure is exported — stays function-scoped inside registerSocketHandlers
-  expectNotContains(handlers, "export temporaryBlocklistBySubject", "blocklist must not be exported");
-  expectNotContains(handlers, "export createAttemptsBySubject", "create-attempt state must not be exported");
+  // Neither state structure is exported directly — accessed only via context object
+  expectNotContains(rateLimiting, "export temporaryBlocklistBySubject", "blocklist must not be exported");
+  expectNotContains(rateLimiting, "export createAttemptsBySubject", "create-attempt state must not be exported");
 
-  // No persistence APIs in the handler file (belt-and-suspenders check scoped to this file)
+  // No persistence APIs in the rate limiting module
   for (const pattern of FORBIDDEN_PERSISTENCE_PATTERNS) {
     assert.equal(
-      pattern.test(handlers),
+      pattern.test(rateLimiting),
       false,
-      `Persistence pattern must not appear in socket handlers: ${pattern}`
+      `Persistence pattern must not appear in rate limiting module: ${pattern}`
     );
   }
 });
 
 test("T3.3-05 (P3-AB-005): per-IP abuse counters persist within their RAM window and are not cleared by room destruction", async () => {
   const handlers = await fs.readFile(SOCKET_HANDLERS_FILE, "utf8");
+  const rateLimiting = await fs.readFile(RATE_LIMITING_FILE, "utf8");
 
   // ipAbuseByIp must be a local in-memory Map — not exported, not persisted
   expectContains(
-    handlers,
-    "const ipAbuseByIp = new Map",
-    "per-IP abuse counter declared as local in-memory Map"
+    rateLimiting,
+    "ipAbuseByIp: new Map()",
+    "per-IP abuse counter declared as in-memory Map inside context factory"
   );
-  expectNotContains(handlers, "export ipAbuseByIp", "per-IP abuse Map must not be exported");
+  expectNotContains(rateLimiting, "export ipAbuseByIp", "per-IP abuse Map must not be exported");
 
   // Window-expiry pruning must exist in the sweeper — ipAbuseByIp.delete must be keyed on window age
   expectContains(
-    handlers,
-    "ipAbuseByIp.delete(ip)",
+    rateLimiting,
+    "ctx.ipAbuseByIp.delete(ip)",
     "sweeper prunes expired per-IP abuse records"
   );
   expectContains(
-    handlers,
+    rateLimiting,
     "IP_ABUSE_WINDOW_MS",
     "per-IP window constant referenced for expiry check"
   );
@@ -301,17 +303,18 @@ test("T3.3-05 (P3-AB-005): per-IP abuse counters persist within their RAM window
   );
 
   // Both create and join paths contribute to the same per-IP record, not per-room
-  expectContains(handlers, "ipAbuseByIp.get(createIp)", "create path reads per-IP record");
-  expectContains(handlers, "ipAbuseByIp.get(joinIp)", "join path reads per-IP record");
-  expectContains(handlers, "ipAbuseByIp.set(createIp", "create path writes per-IP record");
-  expectContains(handlers, "ipAbuseByIp.set(joinIp", "join path writes per-IP record");
+  // checkAndRecordCreateAttempt and checkAndRecordJoinIp both access ctx.ipAbuseByIp via ip parameter
+  expectContains(rateLimiting, "export function checkAndRecordCreateAttempt", "create path function exported from rate limiting module");
+  expectContains(rateLimiting, "export function checkAndRecordJoinIp", "join path function exported from rate limiting module");
+  expectContains(rateLimiting, "ctx.ipAbuseByIp.get(ip)", "per-IP lookup keyed by ip, not roomId");
+  expectContains(rateLimiting, "ctx.ipAbuseByIp.set(ip,", "per-IP write keyed by ip, not roomId");
 
-  // No persistence APIs in the handler file (belt-and-suspenders check scoped to this file)
+  // No persistence APIs in the rate limiting module
   for (const pattern of FORBIDDEN_PERSISTENCE_PATTERNS) {
     assert.equal(
-      pattern.test(handlers),
+      pattern.test(rateLimiting),
       false,
-      `Persistence pattern must not appear in socket handlers: ${pattern}`
+      `Persistence pattern must not appear in rate limiting module: ${pattern}`
     );
   }
 });

@@ -1,4 +1,4 @@
-import type { ParticipantRecord, Phase0RoomRecord, Phase0SignalingState } from "./state";
+import type { ParticipantRecord, RoomRecord, SignalingState } from "./state";
 
 export type RoomIdentityFactories = {
   generateRoomId: () => string;
@@ -14,11 +14,11 @@ export type RoomRemovalResult = {
 };
 
 export function createRoomRecord(
-  state: Phase0SignalingState,
+  state: SignalingState,
   socketId: string,
   now: number,
   factories: RoomIdentityFactories
-): { room: Phase0RoomRecord; participantId: string } {
+): { room: RoomRecord; participantId: string } {
   let roomId = factories.generateRoomId();
   while (state.rooms.has(roomId)) {
     roomId = factories.generateRoomId();
@@ -32,7 +32,7 @@ export function createRoomRecord(
     lastSeenAt: now
   };
 
-  const room: Phase0RoomRecord = {
+  const room: RoomRecord = {
     roomId,
     hostId: participantId,
     participants: new Map<string, ParticipantRecord>([[participantId, hostRecord]]),
@@ -48,12 +48,12 @@ export function createRoomRecord(
 }
 
 export function joinRoomRecord(
-  state: Phase0SignalingState,
+  state: SignalingState,
   roomId: string,
   socketId: string,
   now: number,
   generateParticipantId: () => string
-): { room: Phase0RoomRecord; participantId: string; peers: Array<{ participantId: string; nickname?: string | null }> } | null {
+): { room: RoomRecord; participantId: string; peers: Array<{ participantId: string; nickname?: string | null }> } | null {
   const room = state.rooms.get(roomId);
   if (!room) {
     return null;
@@ -81,7 +81,7 @@ export function joinRoomRecord(
 }
 
 export function removeParticipantBySocket(
-  state: Phase0SignalingState,
+  state: SignalingState,
   socketId: string
 ): RoomRemovalResult | null {
   const participantId = state.socketToParticipant.get(socketId);

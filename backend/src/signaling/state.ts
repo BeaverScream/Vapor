@@ -7,7 +7,7 @@ export type ParticipantRecord = {
   nicknameUpdatedAt?: number;
 };
 
-export type Phase0RoomRecord = {
+export type RoomRecord = {
   roomId: string;
   hostId: string;
   participants: Map<string, ParticipantRecord>;
@@ -15,27 +15,27 @@ export type Phase0RoomRecord = {
   createdAt: number;
 };
 
-export type Phase0SignalingState = {
-  rooms: Map<string, Phase0RoomRecord>;
+export type SignalingState = {
+  rooms: Map<string, RoomRecord>;
   participantToRoom: Map<string, string>;
   socketToParticipant: Map<string, string>;
 };
 
-export function createPhase0State(): Phase0SignalingState {
+export function createSignalingState(): SignalingState {
   return {
-    rooms: new Map<string, Phase0RoomRecord>(),
+    rooms: new Map<string, RoomRecord>(),
     participantToRoom: new Map<string, string>(),
     socketToParticipant: new Map<string, string>()
   };
 }
 
-export function resetPhase0State(state: Phase0SignalingState): void {
+export function resetSignalingState(state: SignalingState): void {
   state.rooms.clear();
   state.participantToRoom.clear();
   state.socketToParticipant.clear();
 }
 
-export function getPhase0StateSnapshot(state: Phase0SignalingState) {
+export function getSignalingStateSnapshot(state: SignalingState) {
   return {
     rooms: Array.from(state.rooms.values()).map((room) => ({
       roomId: room.roomId,
