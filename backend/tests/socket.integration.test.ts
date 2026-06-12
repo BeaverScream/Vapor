@@ -4,6 +4,7 @@ import { createVaporServer } from "../src/server";
 import { CLIENT_EVENTS, GUEST_DISCONNECT_GRACE_MS, HOST_DISCONNECT_GRACE_MS, JOIN_INVALID_ATTEMPT_COOLDOWN_MS, JOIN_INVALID_ATTEMPT_NO_COOLDOWN_MAX, NICKNAME_CHANGE_COOLDOWN_MS, SERVER_EVENTS, SOLO_HOST_ROOM_TIMEOUT_MS } from "../src/signaling/contracts";
 import { registerSocketHandlers } from "../src/signaling/registerSocketHandlers";
 import { createSignalingState, getSignalingStateSnapshot } from "../src/signaling/state";
+import { createMetrics } from "../src/admin/metrics";
 
 type EventPayload = unknown;
 type EventHandler = (payload: EventPayload) => void;
@@ -203,6 +204,73 @@ function setupSocketHarness(overrides?: {
       getParticipantRecord: (roomId: string, participantId: string) =>
         state.rooms.get(roomId)?.participants.get(participantId)
     }
+  };
+}
+
+function setupSocketHarnessWithMetrics(overrides?: {
+  generateRoomId?: () => string;
+  generateParticipantId?: () => string;
+  now?: () => number;
+  sweepIntervalMs?: number;
+}) {
+  const io = new FakeIo();
+  const state = createSignalingState();
+
+  const realMetrics = createMetrics({
+    getActiveRoomCount: () => state.rooms.size,
+    getActiveParticipantCount: () => {
+      let total = 0;
+      for (const room of state.rooms.values()) total += room.participants.size;
+      return total;
+    },
+    getActiveSocketCount: () => state.socketToParticipant.size,
+    getTemporaryBlocklistSize: () => 0,
+    getRateLimitWindowActiveCount: () => 0,
+  });
+
+  const metricsAdapter = {
+    recordConnection: () => undefined,
+    recordRoomJoin: () => undefined,
+    recordDisconnect: () => undefined,
+    recordRoomCreated: () => undefined,
+    recordRoomDestroyed: () => undefined,
+    incrementParticipantsJoined: () => realMetrics.incrementParticipantsJoined(),
+    incrementRoomsCreated: () => realMetrics.incrementRoomsCreated(),
+    incrementRoomDestroyed: (reason: Parameters<typeof realMetrics.incrementRoomDestroyed>[0]) =>
+      realMetrics.incrementRoomDestroyed(reason),
+    incrementErrorCount: (code: Parameters<typeof realMetrics.incrementErrorCount>[0]) =>
+      realMetrics.incrementErrorCount(code),
+    updateRoomLifetimeRolling: (ms: number) => realMetrics.updateRoomLifetimeRolling(ms),
+    updatePeakMarks: () => realMetrics.updatePeakMarks(),
+  };
+
+  registerSocketHandlers({
+    io: io as unknown as Parameters<typeof registerSocketHandlers>[0]["io"],
+    state,
+    metrics: metricsAdapter,
+    now: overrides?.now ?? (() => 123456),
+    factories: {
+      generateRoomId: overrides?.generateRoomId ?? (() => "AbC123"),
+      generateParticipantId:
+        overrides?.generateParticipantId ??
+        (() => {
+          let counter = 0;
+          return () => {
+            counter += 1;
+            return `P-${counter}`;
+          };
+        })(),
+    },
+    sweepIntervalMs: overrides?.sweepIntervalMs,
+  });
+
+  return {
+    io,
+    state,
+    realMetrics,
+    hooks: {
+      getStateSnapshot: () => getSignalingStateSnapshot(state),
+    },
   };
 }
 
@@ -3294,4 +3362,143 @@ test("T4.4-10: kicking a guest in the grace window removes their entry from stat
   const resumeError = popSocketError(kickedResumed);
   assert.ok(resumeError, "Error must be emitted when kicked grace-window participant attempts to resume");
   assert.equal(resumeError.code, "ROOM_NOT_FOUND", "Kicked grace-window participant's reconnect token must be purged");
+});
+
+// ---- T6.1 Metrics counter wiring (signaling hooks) ----
+
+test("T6.1-04: roomsCreatedTotal increases by 1 after a successful create_room event", () => {
+  const { io, realMetrics } = setupSocketHarnessWithMetrics();
+
+  const before = realMetrics.getRawCounters().roomsCreatedTotal;
+
+  const host = io.connect("socket-host");
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+
+  const created = host.popEvent(SERVER_EVENTS.roomCreated);
+  assert.ok(created, "room_created must be emitted");
+
+  assert.equal(
+    realMetrics.getRawCounters().roomsCreatedTotal,
+    before + 1,
+    "roomsCreatedTotal must increase by 1 after create_room",
+  );
+});
+
+test("T6.1-05: roomsDestroyedByReason.host_left increases by 1 after host calls leave_room", () => {
+  const { io, realMetrics } = setupSocketHarnessWithMetrics();
+
+  const host = io.connect("socket-host");
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const created = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+
+  const before = realMetrics.getRawCounters().roomsDestroyedByReason.host_left;
+
+  host.trigger(CLIENT_EVENTS.leaveRoom, { roomId: created.roomId });
+
+  assert.equal(
+    realMetrics.getRawCounters().roomsDestroyedByReason.host_left,
+    before + 1,
+    "host_left counter must increase by 1 after host calls leave_room",
+  );
+});
+
+test("T6.1-06: errorCounts.RATE_LIMITED increases by 1 when a rate-limited error is emitted", async () => {
+  // With a fixed clock (now = 123456), a nicknameUpdate immediately after createRoom
+  // is within the cooldown window (nicknameUpdatedAt == nowTs < nowTs + COOLDOWN),
+  // which triggers RATE_LIMITED via the locally-shadowed emitRateLimited.
+  const { io, realMetrics } = setupSocketHarnessWithMetrics();
+
+  const host = io.connect("socket-host");
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  host.popEvent(SERVER_EVENTS.roomCreated);
+
+  const before = realMetrics.getRawCounters().errorCounts.RATE_LIMITED;
+
+  host.trigger(CLIENT_EVENTS.nicknameUpdate, { nickname: "NewNick" });
+  await flushPromises();
+
+  const error = host.popEvent(SERVER_EVENTS.error) as { code: string } | undefined;
+  assert.ok(error, "Expected a RATE_LIMITED error from nicknameUpdate within the cooldown window");
+  assert.equal(error?.code, "RATE_LIMITED");
+
+  assert.equal(
+    realMetrics.getRawCounters().errorCounts.RATE_LIMITED,
+    before + 1,
+    "RATE_LIMITED error counter must increase by 1",
+  );
+});
+
+test("T6.1-13: participantsJoinedTotal does NOT increment on create_room — only increments on join_room by a guest", () => {
+  const { io, realMetrics } = setupSocketHarnessWithMetrics();
+
+  const baseline = realMetrics.getRawCounters().participantsJoinedTotal;
+
+  const host = io.connect("socket-host");
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  host.popEvent(SERVER_EVENTS.roomCreated);
+
+  assert.equal(
+    realMetrics.getRawCounters().participantsJoinedTotal,
+    baseline,
+    "participantsJoinedTotal must NOT increment when host creates a room",
+  );
+
+  const guest = io.connect("socket-guest");
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: "AbC123", password: "pw", nickname: "Guest" });
+  guest.popEvent(SERVER_EVENTS.roomJoined);
+
+  assert.equal(
+    realMetrics.getRawCounters().participantsJoinedTotal,
+    baseline + 1,
+    "participantsJoinedTotal must increment by 1 when a guest joins via join_room",
+  );
+});
+
+test("T6.1-14: updatePeakMarks() is called during each sweep and reflects the highest concurrent room/participant count", () => {
+  const originalSetInterval = globalThis.setInterval;
+  let capturedSweep: (() => void) | null = null;
+
+  (globalThis as unknown as { setInterval: (cb: () => void) => NodeJS.Timeout }).setInterval =
+    (callback: () => void): NodeJS.Timeout => {
+      capturedSweep = callback;
+      return { unref: () => undefined } as unknown as NodeJS.Timeout;
+    };
+
+  try {
+    const { io, realMetrics } = setupSocketHarnessWithMetrics();
+
+    assert.ok(capturedSweep, "registerSocketHandlers must register a sweep via setInterval");
+
+    const initial = realMetrics.getRawCounters();
+    assert.equal(initial.peakConcurrentRooms, 0, "peak rooms must start at 0");
+    assert.equal(initial.peakConcurrentParticipants, 0, "peak participants must start at 0");
+
+    // Create one room with host + guest — live counts reach 1 room, 2 participants
+    const host = io.connect("socket-host-peak");
+    host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+    host.popEvent(SERVER_EVENTS.roomCreated);
+
+    const guest = io.connect("socket-guest-peak");
+    guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: "AbC123", password: "pw", nickname: "Guest" });
+    guest.popEvent(SERVER_EVENTS.roomJoined);
+
+    // Fire the sweep — must call updatePeakMarks() and capture the high-water marks
+    (capturedSweep as () => void)();
+
+    const afterHigh = realMetrics.getRawCounters();
+    assert.equal(afterHigh.peakConcurrentRooms, 1, "peakConcurrentRooms must be 1 after sweep with 1 active room");
+    assert.equal(afterHigh.peakConcurrentParticipants, 2, "peakConcurrentParticipants must be 2 after sweep with 2 active participants");
+
+    // Host leaves, destroying the room — live counts drop to 0
+    host.trigger(CLIENT_EVENTS.leaveRoom, { roomId: "AbC123" });
+
+    // Fire the sweep again — peaks must remain at the established high-water marks
+    (capturedSweep as () => void)();
+
+    const afterLow = realMetrics.getRawCounters();
+    assert.equal(afterLow.peakConcurrentRooms, 1, "peakConcurrentRooms must not decrease when active count drops below peak");
+    assert.equal(afterLow.peakConcurrentParticipants, 2, "peakConcurrentParticipants must not decrease when active count drops below peak");
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+  }
 });

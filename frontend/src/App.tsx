@@ -5,12 +5,14 @@ import { LobbyView } from './features/room/LobbyView'
 import { RoomEndedView } from './features/room/RoomEndedView'
 import { RoomView } from './features/room/RoomView'
 import { useVaporRoom } from './features/room/useVaporRoom'
+import { AdminDashboard } from './features/admin/AdminDashboard'
 
-type Page = 'app' | 'privacy' | 'faq'
+type Page = 'app' | 'privacy' | 'faq' | 'admin'
 
 function pathToPage(pathname: string): Page {
   if (pathname === '/privacy-policy') return 'privacy'
   if (pathname === '/faq') return 'faq'
+  if (pathname === '/admin') return 'admin'
   return 'app'
 }
 
@@ -29,6 +31,15 @@ function App() {
   function navigate(path: string, target: Page) {
     window.history.pushState({}, '', path)
     setPage(target)
+  }
+
+  if (page === 'admin') {
+    return (
+      <main className="relative min-h-dvh overflow-hidden px-4">
+        <div className="vapor-smoke-layer" aria-hidden="true" />
+        <AdminDashboard onBack={() => navigate('/', 'app')} />
+      </main>
+    )
   }
 
   if (page === 'privacy') {

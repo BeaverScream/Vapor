@@ -1,5 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { Router } from "express";
+import type { NextFunction, Response } from "express";
+
+// Structural request type matching the express-fallback declaration (Request = unknown).
+type Req = { header: (name: string) => string | undefined };
 
 type CreateAdminRouterArgs = {
   getSnapshot: () => unknown;
@@ -20,7 +24,7 @@ function safeEqual(a: string, b: string): boolean {
 export function createAdminRouter({ getSnapshot, adminMetricsToken }: CreateAdminRouterArgs) {
   const router = Router();
 
-  router.use((req, res, next) => {
+  router.use((req: Req, res: Response, next: NextFunction) => {
     if (!adminMetricsToken) {
       return res.status(503).json({
         error: "ADMIN_METRICS_DISABLED"
@@ -37,7 +41,7 @@ export function createAdminRouter({ getSnapshot, adminMetricsToken }: CreateAdmi
     return next();
   });
 
-  router.get("/metrics", (_req, res) => {
+  router.get("/metrics", (_req: unknown, res: Response) => {
     res.json(getSnapshot());
   });
 

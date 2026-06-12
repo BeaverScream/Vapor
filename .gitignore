@@ -33,6 +33,9 @@ Thumbs.db
 # Docker local overrides
 docker-compose.override.yml
 
+# Analytics data
+backend/data/
+
 # Others
 .github/
 docs

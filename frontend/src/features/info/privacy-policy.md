@@ -100,6 +100,25 @@ There is no long-term data retention because there is no long-term data. All sta
 
 ---
 
+## Operational Metrics
+
+To monitor service health and detect abuse, Vapor writes **aggregate operational metrics** to an external observability store. These metrics are strictly non-identifiable:
+
+| What IS written | What is NEVER written |
+|---|---|
+| Active room count (aggregate) | Room IDs |
+| Active participant count (aggregate) | Participant IDs |
+| Error rates (RATE_LIMITED, ROOM_NOT_FOUND, etc.) | Nicknames |
+| Heap usage and uptime | Reconnect tokens |
+| Room destruction reason breakdown | Passwords or password hashes |
+| Peak concurrent rooms / participants | SDP / ICE payloads |
+| Blocklist and rate-limit window sizes | IP addresses |
+| | Any session-scoped or user-identifiable data |
+
+**The zero-persistence guarantee for user and session data is unchanged.** No message content, file transfers, passwords, reconnect tokens, or user-linked identifiers are ever written to any persistent store. The observability store contains only aggregate operational counters — there is no way to reconstruct room activity, participant identity, or conversation content from these records.
+
+---
+
 ## Changes to This Policy
 
 Material changes will be reflected with an updated date above. Because Vapor collects no accounts or contact information, we cannot notify you directly — check this page for updates.

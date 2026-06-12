@@ -3,7 +3,31 @@
     "allow": [
       "Bash(npm test *)",
       "Skill(code-review)",
-      "Skill(code-review:*)"
+      "Skill(code-review:*)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\cream\\\\OneDrive\\\\Desktop\\\\Projects\\\\Vapor\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\cream\\\\OneDrive\\\\Desktop\\\\Projects\\\\Vapor\\\\backend\\\\src\\\\\" -Recurse | Select-Object -Property FullName | Sort-Object FullName)",
+      "Bash(node_modules/.bin/tsc --version)",
+      "Bash(node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext src/admin/metrics.ts)",
+      "Bash(node -e \"const e = require\\('@types/express/index.d.ts'\\); console.log\\('ok'\\)\")",
+      "Bash(npx tremor@latest add card)",
+      "Bash(npm info *)",
+      "Bash(npm install *)",
+      "Bash(npm uninstall *)",
+      "Bash(rm \"c:\\\\Users\\\\cream\\\\OneDrive\\\\Desktop\\\\Projects\\\\Vapor\\\\backend\\\\db\\\\vapor_hourly_stats.sql\")",
+      "Bash(rmdir \"c:\\\\Users\\\\cream\\\\OneDrive\\\\Desktop\\\\Projects\\\\Vapor\\\\backend\\\\db\")",
+      "Bash(node -e \"const e = require\\('express'\\); const r = e.Router\\(\\); console.log\\(typeof r.post\\)\")",
+      "Bash(node -e \"const {Router} = require\\('express'\\); const r = Router\\(\\); console.log\\(Object.keys\\(Object.getPrototypeOf\\(r\\)\\).filter\\(k => ['get','post','put','delete','use'].includes\\(k\\)\\)\\)\")",
+      "Bash(node -e \"console.log\\(require\\('express/package.json'\\).version\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(dir \"c:\\\\Users\\\\cream\\\\OneDrive\\\\Desktop\\\\Projects\\\\Vapor\")",
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
+      "PowerShell(npm run typecheck)",
+      "PowerShell(npx tsc --noEmit --target ES2022 --module ESNext --moduleResolution Bundler --strict --skipLibCheck --esModuleInterop --types node tests/admin.unit.test.ts tests/admin.integration.test.ts)",
+      "PowerShell(npx tsc -b --pretty false 2>$null; echo \"exit=$LASTEXITCODE\")",
+      "PowerShell(npm install --prefix \"c:\\\\Users\\\\cream\\\\OneDrive\\\\Desktop\\\\Projects\\\\Vapor\\\\backend\")",
+      "PowerShell(Set-Location \"c:\\\\Users\\\\cream\\\\OneDrive\\\\Desktop\\\\Projects\\\\Vapor\\\\backend\"; npx tsc --noEmit; \"EXIT: $LASTEXITCODE\")"
     ]
   }
 }

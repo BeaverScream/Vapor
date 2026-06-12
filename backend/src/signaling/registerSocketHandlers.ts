@@ -30,9 +30,11 @@ import {
 } from "./roomLifecycle";
 import * as passwordAuth from "./handlers/passwordAuth";
 import * as rateLimiting from "./handlers/rateLimiting";
+import type { RateLimitingContext } from "./handlers/rateLimiting";
 import * as reconnect from "./handlers/reconnectionManager";
 import * as grace from "./handlers/graceWindowManager";
 import * as relay from "./handlers/signalRelay";
+import type { DestroyReason, MetricsErrorCode } from "../admin/metrics";
 
 type MetricsAdapter = {
   recordConnection: (socketId: string, now?: number) => void;
@@ -40,6 +42,12 @@ type MetricsAdapter = {
   recordDisconnect: (socketId: string, now?: number) => void;
   recordRoomCreated: (roomId: string, now?: number) => void;
   recordRoomDestroyed: (roomId: string, now?: number) => void;
+  incrementParticipantsJoined?: () => void;
+  incrementRoomsCreated?: () => void;
+  incrementRoomDestroyed?: (reason: DestroyReason) => void;
+  incrementErrorCount?: (code: MetricsErrorCode) => void;
+  updateRoomLifetimeRolling?: (lifetimeMs: number) => void;
+  updatePeakMarks?: () => void;
 };
 
 const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 60 * 1000;
@@ -51,6 +59,7 @@ type RegisterSocketHandlersArgs = {
   now: () => number;
   factories: RoomIdentityFactories;
   sweepIntervalMs?: number;
+  rateLimitCtx?: RateLimitingContext;
 };
 
 type ExitSource = "disconnect" | "leave";
@@ -59,28 +68,8 @@ function emitSocketError(socket: Socket, code: SignalingErrorCode): void {
   socket.emit(signaling.SERVER_EVENTS.error, signaling.makeSocketErrorPayload(code));
 }
 
-function emitRoomNotFound(socket: Socket): void {
-  emitSocketError(socket, signaling.ERROR_CODES.roomNotFound);
-}
-
-function emitInvalidPassword(socket: Socket): void {
-  emitSocketError(socket, signaling.ERROR_CODES.invalidPassword);
-}
-
-function emitRoomFull(socket: Socket): void {
-  emitSocketError(socket, signaling.ERROR_CODES.roomFull);
-}
-
-function emitRateLimited(socket: Socket): void {
-  emitSocketError(socket, signaling.ERROR_CODES.rateLimited);
-}
-
 function emitInvalidSignalPayload(socket: Socket): void {
   emitSocketError(socket, signaling.ERROR_CODES.invalidSignalPayload);
-}
-
-function emitNotAuthorized(socket: Socket): void {
-  emitSocketError(socket, signaling.ERROR_CODES.notAuthorized);
 }
 
 function normalizeNickname(value: unknown): string | null {
@@ -124,12 +113,36 @@ export function registerSocketHandlers({
   now,
   factories,
   sweepIntervalMs = DEFAULT_SWEEP_INTERVAL_MS,
+  rateLimitCtx: providedRateLimitCtx,
 }: RegisterSocketHandlersArgs): NodeJS.Timeout {
   const authCtx = passwordAuth.createPasswordAuthContext();
-  const rateLimitCtx = rateLimiting.createRateLimitingContext();
+  const rateLimitCtx = providedRateLimitCtx ?? rateLimiting.createRateLimitingContext();
   const reconnectCtx = reconnect.createReconnectContext();
   const graceCtx = grace.createGraceWindowContext();
   const roomLockChains = new Map<string, Promise<void>>();
+
+  // Error emit helpers with counter tracking. Keep these inside the closure so every
+  // handler binds the instrumented version — do not add un-instrumented module-level twins.
+  const emitRoomNotFound = (socket: Socket): void => {
+    metrics.incrementErrorCount?.("ROOM_NOT_FOUND");
+    emitSocketError(socket, signaling.ERROR_CODES.roomNotFound);
+  };
+  const emitInvalidPassword = (socket: Socket): void => {
+    metrics.incrementErrorCount?.("INVALID_PASSWORD");
+    emitSocketError(socket, signaling.ERROR_CODES.invalidPassword);
+  };
+  const emitRoomFull = (socket: Socket): void => {
+    metrics.incrementErrorCount?.("ROOM_FULL");
+    emitSocketError(socket, signaling.ERROR_CODES.roomFull);
+  };
+  const emitRateLimited = (socket: Socket): void => {
+    metrics.incrementErrorCount?.("RATE_LIMITED");
+    emitSocketError(socket, signaling.ERROR_CODES.rateLimited);
+  };
+  const emitNotAuthorized = (socket: Socket): void => {
+    metrics.incrementErrorCount?.("NOT_AUTHORIZED");
+    emitSocketError(socket, signaling.ERROR_CODES.notAuthorized);
+  };
 
   // Shorthand helpers that bind the context objects
   const clearGuestGraceFn = (participantId: string): void =>
@@ -170,12 +183,18 @@ export function registerSocketHandlers({
   };
 
   const destroyRoom = (roomId: string, reason: RoomDestroyedPayload["reason"]): void => {
-    metrics.recordRoomDestroyed(roomId, now());
+    const nowTs = now();
+    metrics.recordRoomDestroyed(roomId, nowTs);
+    const room = state.rooms.get(roomId);
+    // Only count rooms that still exist — a sweep/timer double-fire against an
+    // already-deleted room must not inflate the destruction reason counters.
+    if (room) {
+      metrics.incrementRoomDestroyed?.(reason);
+      metrics.updateRoomLifetimeRolling?.(nowTs - room.createdAt);
+    }
 
     const policy = graceCtx.roomPolicyById.get(roomId);
     if (policy) grace.clearRoomPolicyTimers(policy);
-
-    const room = state.rooms.get(roomId);
 
     if (room) {
       for (const participant of room.participants.values()) {
@@ -231,6 +250,9 @@ export function registerSocketHandlers({
 
     const participantCount = activeRoom.participants.size;
     if (participantCount === 0) {
+      const nowTs = now();
+      metrics.incrementRoomDestroyed?.("host_grace_expired");
+      metrics.updateRoomLifetimeRolling?.(nowTs - activeRoom.createdAt);
       state.rooms.delete(roomId);
       clearRoomArtifacts(roomId);
       return;
@@ -302,6 +324,9 @@ export function registerSocketHandlers({
         socket.join(room.roomId);
         metrics.recordRoomJoin(socket.id, room.roomId);
         metrics.recordRoomCreated(room.roomId, createdAt);
+        metrics.incrementRoomsCreated?.();
+        // Concurrency can only rise here — sample peaks now, not just on the 5-hourly sweep.
+        metrics.updatePeakMarks?.();
 
         const response: RoomCreatedPayload = {
           roomId: room.roomId,
@@ -422,6 +447,8 @@ export function registerSocketHandlers({
 
         socket.join(roomId);
         metrics.recordRoomJoin(socket.id, roomId);
+        metrics.incrementParticipantsJoined?.();
+        metrics.updatePeakMarks?.();
 
         const roomJoinedPayload: RoomJoinedPayload = {
           roomId,
@@ -749,11 +776,20 @@ export function registerSocketHandlers({
     );
 
     socket.on(signaling.CLIENT_EVENTS.leaveRoom, () => {
+      const leavingParticipantId = state.socketToParticipant.get(socket.id);
+      const leavingRoomId = leavingParticipantId ? state.participantToRoom.get(leavingParticipantId) : undefined;
+      const leavingRoomCreatedAt = leavingRoomId ? state.rooms.get(leavingRoomId)?.createdAt : undefined;
+
       const removed = removeParticipantBySocket(state, socket.id);
       emitParticipantExit(socket, removed, "leave");
       if (removed) clearReconnectForParticipantFn(removed.participantId);
       if (removed && !removed.roomStillActive) {
-        metrics.recordRoomDestroyed(removed.roomId, now());
+        const nowTs = now();
+        metrics.recordRoomDestroyed(removed.roomId, nowTs);
+        if (removed.isHost && leavingRoomCreatedAt !== undefined) {
+          metrics.incrementRoomDestroyed?.("host_left");
+          metrics.updateRoomLifetimeRolling?.(nowTs - leavingRoomCreatedAt);
+        }
         clearRoomArtifacts(removed.roomId);
       }
       metrics.recordDisconnect(socket.id);
@@ -846,6 +882,8 @@ export function registerSocketHandlers({
         state.socketToParticipant.delete(socketId);
       }
     }
+
+    metrics.updatePeakMarks?.();
   };
 
   const sweepRef = setInterval(sweep, sweepIntervalMs);

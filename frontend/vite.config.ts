@@ -10,6 +10,9 @@ const sharedPath = process.env.SHARED_PATH ?? path.resolve(__dirname, '../shared
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  define: {
+    'import.meta.env.VITE_ADMIN_TOKEN': JSON.stringify(process.env.ADMIN_API_TOKEN ?? ''),
+  },
   resolve: {
     alias: {
       '@shared': sharedPath,

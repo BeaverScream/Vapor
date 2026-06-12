@@ -10,6 +10,7 @@ declare module "express" {
   export type RouterType = {
     use: (...args: unknown[]) => unknown;
     get: (...args: unknown[]) => unknown;
+    post: (...args: unknown[]) => unknown;
   };
 
   export function Router(): RouterType;

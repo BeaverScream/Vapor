@@ -4,16 +4,19 @@ import { createServer } from "node:http";
 import { Server } from "socket.io";
 import { instrument } from "@socket.io/admin-ui";
 import { createMetricsRegistry } from "./admin/metricsRegistry";
-import { createAdminRouter } from "./admin/createAdminRouter";
+import { createMetrics } from "./admin/metrics";
+import { createAdminMetricsRouter } from "./admin/routes";
+import { createScheduler, type Scheduler } from "./admin/scheduler";
+import { CsvAnalyticsStore, type AnalyticsStore } from "./admin/analytics";
 import { generateToken } from "./signaling/backendUtils";
 import { createSignalingState, getSignalingStateSnapshot, resetSignalingState } from "./signaling/state";
 import { registerSocketHandlers } from "./signaling/registerSocketHandlers";
+import { createRateLimitingContext } from "./signaling/handlers/rateLimiting";
 import type { RoomIdentityFactories } from "./signaling/roomLifecycle";
 
 type CreateVaporServerArgs = {
   frontendOrigin?: string;
   port?: number;
-  adminMetricsToken?: string;
   adminUiUsername?: string;
   adminUiPassword?: string;
   adminUiOrigin?: string;
@@ -25,7 +28,6 @@ type CreateVaporServerArgs = {
 export function createVaporServer({
   frontendOrigin = "http://localhost:5173",
   port = 3001,
-  adminMetricsToken,
   adminUiUsername,
   adminUiPassword,
   adminUiOrigin = "https://admin.socket.io",
@@ -35,11 +37,39 @@ export function createVaporServer({
 }: CreateVaporServerArgs = {}) {
   const app = express();
   const httpServer = createServer(app as any);
-  const metrics = createMetricsRegistry();
+  const legacyMetrics = createMetricsRegistry();
   const state = createSignalingState();
+  const rateLimitCtx = createRateLimitingContext();
   const factories: RoomIdentityFactories = {
     generateRoomId,
     generateParticipantId
+  };
+
+  const newMetrics = createMetrics({
+    getActiveRoomCount: () => state.rooms.size,
+    getActiveParticipantCount: () => {
+      let total = 0;
+      for (const room of state.rooms.values()) total += room.participants.size;
+      return total;
+    },
+    getActiveSocketCount: () => state.socketToParticipant.size,
+    getTemporaryBlocklistSize: () => rateLimitCtx.temporaryBlocklistBySubject.size,
+    getRateLimitWindowActiveCount: () =>
+      rateLimitCtx.createAttemptsBySubject.size + rateLimitCtx.joinAttemptByRoomSubject.size,
+  });
+
+  const metricsAdapter = {
+    recordConnection: (socketId: string, ts?: number) => legacyMetrics.recordConnection(socketId, ts),
+    recordRoomJoin: (socketId: string, roomId: string) => legacyMetrics.recordRoomJoin(socketId, roomId),
+    recordDisconnect: (socketId: string, ts?: number) => legacyMetrics.recordDisconnect(socketId, ts),
+    recordRoomCreated: (roomId: string, ts?: number) => legacyMetrics.recordRoomCreated(roomId, ts),
+    recordRoomDestroyed: (roomId: string, ts?: number) => legacyMetrics.recordRoomDestroyed(roomId, ts),
+    incrementParticipantsJoined: () => newMetrics.incrementParticipantsJoined(),
+    incrementRoomsCreated: () => newMetrics.incrementRoomsCreated(),
+    incrementRoomDestroyed: newMetrics.incrementRoomDestroyed.bind(newMetrics),
+    incrementErrorCount: newMetrics.incrementErrorCount.bind(newMetrics),
+    updateRoomLifetimeRolling: newMetrics.updateRoomLifetimeRolling.bind(newMetrics),
+    updatePeakMarks: () => newMetrics.updatePeakMarks(),
   };
 
   app.use(cors({ origin: frontendOrigin }));
@@ -57,13 +87,20 @@ export function createVaporServer({
     }
   );
 
-  app.use(
-    "/admin",
-    createAdminRouter({
-      getSnapshot: () => metrics.snapshot(),
-      adminMetricsToken
-    })
-  );
+  const hasAdminToken = !!process.env.ADMIN_API_TOKEN;
+  const hasAdminBasicAuth = !!(process.env.ADMIN_BASIC_USER && process.env.ADMIN_BASIC_PASS);
+
+  let scheduler: Scheduler | null = null;
+  let analyticsStore: AnalyticsStore | null = null;
+
+  if (hasAdminToken || hasAdminBasicAuth) {
+    analyticsStore = new CsvAnalyticsStore("./data/vapor-metrics.csv");
+    app.use("/admin", createAdminMetricsRouter(newMetrics, analyticsStore));
+    scheduler = createScheduler({ metrics: newMetrics, store: analyticsStore });
+    scheduler.start();
+  } else {
+    console.warn("[vapor] No admin auth env vars configured — admin routes are disabled.");
+  }
 
   const io = new Server(httpServer, {
     cors: {
@@ -86,9 +123,10 @@ export function createVaporServer({
   registerSocketHandlers({
     io,
     state,
-    metrics,
+    metrics: metricsAdapter,
     now,
-    factories
+    factories,
+    rateLimitCtx,
   });
 
   return {
@@ -105,6 +143,10 @@ export function createVaporServer({
       }),
     stop: () =>
       new Promise<void>((resolve, reject) => {
+        scheduler?.stop();
+        analyticsStore?.close().catch((err: unknown) => {
+          console.error("[vapor] analytics store close error:", err);
+        });
         io.close((ioErr) => {
           if (ioErr) {
             reject(ioErr);

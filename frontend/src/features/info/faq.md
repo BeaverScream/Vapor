@@ -152,9 +152,34 @@ Yes, the UX is optimized for mobile. Backend supports high-latency networks + IP
 Vapor uses detect-and-block controls instead of default client-side friction:
 1. Server-side RAM rate limits (IP and request-window based).
 2. Temporary in-memory blocklists for anomalous bursts.
-3. Aggregate-only telemetry for operational visibility.
+3. Aggregate operational metrics written to an external observability store (see "Does Vapor collect any analytics?" below).
 
 This reduces spam without introducing persistent identity tracking or mandatory puzzles.
+
+---
+
+### Q: Does Vapor collect any analytics?
+
+**A:**  
+Only aggregate operational metrics — no user-identifiable data of any kind.
+
+Vapor writes the following to an external observability store for service health monitoring and abuse detection:
+
+- Active room count, active participant count, active socket count
+- Error rates (RATE_LIMITED, ROOM_NOT_FOUND, ROOM_FULL, etc.)
+- Room destruction reason breakdown
+- Peak concurrent rooms and participants
+- Heap usage and process uptime
+
+**What is never written:**
+- Room IDs, participant IDs, nicknames
+- Reconnect tokens, passwords, or password hashes
+- SDP / ICE payloads
+- IP addresses or any session-scoped data
+
+**The zero-persistence guarantee for user and session data is unchanged.** The observability store contains only aggregate counters. There is no way to reconstruct room activity, participant identity, or conversation content from these records.
+
+Because Vapor is open source, you can verify this directly — the metrics collection and flush logic are visible in the codebase.
 
 ---
 
@@ -179,26 +204,3 @@ Partially. Vapor can use best-effort device classification (user-agent/client hi
 - Prefer threshold tuning over user-facing friction.
 
 ---
-
-### Q: Why not use Bitcoin/mining-style puzzles for room creation?
-
-**A:**  
-Mining-style puzzles are intentionally not used.
-
-**Key risks:**
-1. **Security and abuse optics:** resembles cryptojacking behavior.
-2. **UX/battery impact:** severe CPU and battery drain (especially mobile).
-3. **Fairness issues:** users with low-end devices are penalized most.
-4. **Operational unpredictability:** challenge duration varies widely by hardware.
-5. **Compliance/legal risk:** may trigger policy, store-distribution, or jurisdiction concerns.
-
-If challenge friction is ever enabled, keep it lightweight and optional, not mining-style.
-
----
-
-### Q: Can puzzle solving produce useful output instead of just anti-spam proof?
-
-**A:**  
-Not in Phase 1. Vapor puzzle guard is intentionally lightweight and verification-first. Useful-computation puzzles introduce complex fairness, validation, and abuse trade-offs.
-
-For now, treat puzzle solving as abuse friction only.

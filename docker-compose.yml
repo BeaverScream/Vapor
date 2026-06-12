@@ -5,6 +5,8 @@ services:
     container_name: vapor-frontend
     ports:
       - "5173:5173"
+    env_file:
+      - ./backend/.env
     environment:
       - CHOKIDAR_USEPOLLING=true
       - SHARED_PATH=/app/shared
@@ -22,6 +24,10 @@ services:
     container_name: vapor-backend
     ports:
       - "3001:3001"
+    mem_limit: 256m
+    memswap_limit: 256m
+    env_file:
+      - ./backend/.env
     environment:
       - PORT=3001
       - FRONTEND_ORIGIN=http://localhost:5173
