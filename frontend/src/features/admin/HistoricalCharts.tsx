@@ -24,11 +24,19 @@ function HistoricalCharts({ token, range, onRangeChange }: HistoricalChartsProps
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
-    fetchHistory(token, range)
-      .then((data) => { if (!cancelled) { setRows(data); setLoading(false) } })
-      .catch((err: Error) => { if (!cancelled) { setError(err.message); setLoading(false) } })
+    const loadHistory = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const data = await fetchHistory(token, range)
+        if (!cancelled) setRows(data)
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load history')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void loadHistory()
     return () => { cancelled = true }
   }, [token, range])
 

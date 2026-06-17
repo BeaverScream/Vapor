@@ -72,7 +72,7 @@ export class VaporWebRtcChatMesh {
     for (const peerId of peerSet) {
       this.ensurePeerConnection(peerId)
       if (this.shouldInitiate(peerId)) {
-        this.startOffer(peerId)
+        void this.startOffer(peerId)
       }
     }
 
@@ -92,7 +92,7 @@ export class VaporWebRtcChatMesh {
 
     this.ensurePeerConnection(peerId)
     if (this.shouldInitiate(peerId)) {
-      this.startOffer(peerId)
+      void this.startOffer(peerId)
     }
   }
 
@@ -429,7 +429,7 @@ export class VaporWebRtcChatMesh {
         const stats = await connection.getStats()
         let bytesReceived = 0
         let bytesSent = 0
-        stats.forEach((report) => {
+        stats.forEach((report: RTCStats) => {
           if (report.type === 'transport') {
             const s = report as unknown as { bytesReceived?: number; bytesSent?: number }
             bytesReceived += s.bytesReceived ?? 0

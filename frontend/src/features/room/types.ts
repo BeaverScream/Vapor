@@ -1,7 +1,7 @@
 import {
   CLIENT_EVENT_NAMES,
   SERVER_EVENT_NAMES,
-  SIGNALING_ERROR_CODES,
+  type SIGNALING_ERROR_CODES,
   type CreateRoomPayload,
   type HostReconnectGracePayload as SharedHostReconnectGracePayload,
   type JoinRoomPayload,
@@ -106,25 +106,25 @@ export type SignalAnswerRelayPayload = SharedSignalAnswerRelayPayload
 
 export type SignalIceRelayPayload = SharedSignalIceRelayPayload
 
-export interface SignalOfferRequest extends Required<SignalOfferPayload> {}
+export type SignalOfferRequest = Required<SignalOfferPayload>
 
-export interface SignalAnswerRequest extends Required<SignalAnswerPayload> {}
+export type SignalAnswerRequest = Required<SignalAnswerPayload>
 
-export interface SignalIceRequest extends Required<SignalIcePayload> {}
+export type SignalIceRequest = Required<SignalIcePayload>
 
 export type ResumeSessionPayload = SharedResumeSessionPayload
 
-export interface ResumeSessionRequest extends Required<ResumeSessionPayload> {}
+export type ResumeSessionRequest = Required<ResumeSessionPayload>
 
-export interface CreateRoomRequest extends Required<CreateRoomPayload> {}
+export type CreateRoomRequest = Required<CreateRoomPayload>
 
-export interface JoinRoomRequest extends Required<JoinRoomPayload> {}
+export type JoinRoomRequest = Required<JoinRoomPayload>
 
 export interface LeaveRoomRequest {
   roomId: string
 }
 
-export interface KickParticipantRequest extends Required<KickParticipantPayload> {}
+export type KickParticipantRequest = Required<KickParticipantPayload>
 
 export type RoomJoinedPayload = SharedRoomJoinedPayload
 

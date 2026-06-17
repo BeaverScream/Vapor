@@ -44,8 +44,8 @@ function LiveMetrics({ token, onAuthError }: LiveMetricsProps) {
   }, [token, onAuthError])
 
   useEffect(() => {
-    fetchSnapshot()
-    const id = setInterval(fetchSnapshot, POLL_INTERVAL_MS)
+    void fetchSnapshot()
+    const id = setInterval(() => void fetchSnapshot(), POLL_INTERVAL_MS)
     return () => clearInterval(id)
   }, [fetchSnapshot])
 
@@ -61,7 +61,7 @@ function LiveMetrics({ token, onAuthError }: LiveMetricsProps) {
     return (
       <div className="flex items-center gap-4 rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
         <span>Error: {fetchError}</span>
-        <button onClick={fetchSnapshot} className="text-xs underline hover:no-underline">
+        <button onClick={() => void fetchSnapshot()} className="text-xs underline hover:no-underline">
           Retry
         </button>
       </div>
@@ -78,7 +78,7 @@ function LiveMetrics({ token, onAuthError }: LiveMetricsProps) {
               Last updated {secondsSince}s ago
             </span>
           )}
-          <Button variant="secondary" size="sm" onClick={fetchSnapshot} disabled={loading}>
+          <Button variant="secondary" size="sm" onClick={() => void fetchSnapshot()} disabled={loading}>
             {loading ? 'Refreshing…' : 'Refresh'}
           </Button>
         </div>

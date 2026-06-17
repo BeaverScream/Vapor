@@ -1,6 +1,6 @@
 # Vapor Quick Reference: FAQ & Glossary
 
-## FAQ
+---
 
 ### Q: Why doesn't Vapor store chat history on the server?
 

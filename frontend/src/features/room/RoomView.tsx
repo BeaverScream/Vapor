@@ -1,9 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState, useCallback, type FormEvent, type ChangeEvent } from 'react'
 import { Button } from '../../components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
 import { Input } from '../../components/ui/input'
 import { cn } from '../../lib/utils'
-import { UI_COPY } from './constants'
 import { getSoloWaitingText, getLifetimeText } from './useVaporRoom'
 import type { ChatMessage, Participant } from './types'
 
@@ -29,12 +28,44 @@ interface RoomViewProps {
   onKickParticipant: (targetParticipantId: string) => void
 }
 
-const PARTICIPANT_TONES = [
-  'border-cyan-200/45 bg-cyan-200/10 text-cyan-100',
-  'border-emerald-200/45 bg-emerald-200/10 text-emerald-100',
-  'border-amber-200/45 bg-amber-200/10 text-amber-100',
-  'border-indigo-200/45 bg-indigo-200/10 text-indigo-100',
-  'border-rose-200/45 bg-rose-200/10 text-rose-100',
+interface ParticipantTone {
+  chip: string
+  avatar: string
+  name: string
+}
+
+// Per-participant identity tones. The avatar chip is a solid fill (white on a
+// dark hue) so it reads on any surface. The roster `chip` pill text and the
+// message `name` ink, however, sit on the theme surface, so each carries a
+// light-on-dark shade by default (dark/blue fields, blue being the default
+// theme) and a dark-on-light shade under the `theme-light:` variant — keeping
+// nicknames WCAG-AA readable in all three themes (see index.css custom variant).
+const PARTICIPANT_TONES: readonly ParticipantTone[] = [
+  {
+    chip: 'border-cyan-400/30 bg-cyan-400/15 text-cyan-200 theme-light:border-cyan-700/30 theme-light:bg-cyan-700/10 theme-light:text-cyan-800',
+    avatar: 'bg-cyan-800 text-white',
+    name: 'text-cyan-300 theme-light:text-cyan-800',
+  },
+  {
+    chip: 'border-emerald-400/30 bg-emerald-400/15 text-emerald-200 theme-light:border-emerald-700/30 theme-light:bg-emerald-700/10 theme-light:text-emerald-800',
+    avatar: 'bg-emerald-800 text-white',
+    name: 'text-emerald-300 theme-light:text-emerald-800',
+  },
+  {
+    chip: 'border-amber-400/30 bg-amber-400/15 text-amber-200 theme-light:border-amber-700/30 theme-light:bg-amber-700/10 theme-light:text-amber-800',
+    avatar: 'bg-amber-700 text-white',
+    name: 'text-amber-300 theme-light:text-amber-800',
+  },
+  {
+    chip: 'border-indigo-400/30 bg-indigo-400/15 text-indigo-200 theme-light:border-indigo-700/30 theme-light:bg-indigo-700/10 theme-light:text-indigo-800',
+    avatar: 'bg-indigo-800 text-white',
+    name: 'text-indigo-300 theme-light:text-indigo-800',
+  },
+  {
+    chip: 'border-rose-400/30 bg-rose-400/15 text-rose-200 theme-light:border-rose-700/30 theme-light:bg-rose-700/10 theme-light:text-rose-800',
+    avatar: 'bg-rose-800 text-white',
+    name: 'text-rose-300 theme-light:text-rose-800',
+  },
 ] as const
 
 function hashParticipantId(participantId: string): number {
@@ -47,9 +78,6 @@ function hashParticipantId(participantId: string): number {
   return Math.abs(hash)
 }
 
-function getParticipantTone(participantId: string): string {
-  return PARTICIPANT_TONES[hashParticipantId(participantId) % PARTICIPANT_TONES.length]
-}
 
 function displayParticipantId(participantId: string): string {
   if (participantId.length <= 14) {
@@ -59,21 +87,109 @@ function displayParticipantId(participantId: string): string {
   return `${participantId.slice(0, 6)}...${participantId.slice(-4)}`
 }
 
+function getParticipantInitials(participantId: string, participantNicknames: Record<string, string>): string {
+  const nickname = participantNicknames[participantId]
+  const source = nickname && nickname.trim().length > 0 ? nickname.trim() : participantId
+  const words = source.split(/\s+/).filter(Boolean)
+  if (words.length >= 2) {
+    return `${words[0][0]}${words[1][0]}`.toUpperCase()
+  }
+
+  return source.slice(0, 2).toUpperCase()
+}
+
+function formatMessageTime(sentAtMs: number): string {
+  return new Date(sentAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+const ChevronIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="14" height="14" className={className} aria-hidden="true">
+    <path d="m4 6 4 4 4-4" />
+  </svg>
+)
+
+const CopyIcon = () => (
+  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" width="14" height="14" aria-hidden="true">
+    <rect x="6" y="6" width="8.5" height="8.5" rx="2" />
+    <path d="M3.5 10H3a1.5 1.5 0 0 1-1.5-1.5v-5A1.5 1.5 0 0 1 3 2h5A1.5 1.5 0 0 1 9.5 3.5V4" />
+  </svg>
+)
+
+const SendIcon = () => (
+  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" width="16" height="16" aria-hidden="true">
+    <path d="M14.5 1.5 7 9m7.5-7.5-4.8 13-2.7-5.5L1.5 6.3l13-4.8Z" />
+  </svg>
+)
+
+interface AvatarStackProps {
+  participants: Participant[]
+  participantNicknames: Record<string, string>
+  participantCount: number
+  isOpen: boolean
+  onToggle: () => void
+  getTone: (participantId: string) => ParticipantTone
+}
+
+const MAX_VISIBLE_AVATARS = 4
+
+const AvatarStack = memo(function AvatarStack({ participants, participantNicknames, participantCount, isOpen, onToggle, getTone }: AvatarStackProps) {
+  const visibleParticipants = participants.slice(0, MAX_VISIBLE_AVATARS)
+  const overflowCount = participants.length - visibleParticipants.length
+
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={isOpen}
+      aria-controls="participants-roster"
+      aria-label={isOpen ? 'Hide participants' : 'Show participants'}
+      className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-full p-1 transition-colors hover:bg-accent/60 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+    >
+      <span className="flex items-center">
+        {visibleParticipants.map((participant, index) => (
+          <span
+            key={participant.participantId}
+            title={participantNicknames[participant.participantId] ?? displayParticipantId(participant.participantId)}
+            className={cn(
+              'flex size-9 items-center justify-center rounded-full border-2 border-card text-[11px] font-bold',
+              index > 0 && '-ml-2.5',
+              getTone(participant.participantId).avatar,
+            )}
+          >
+            {getParticipantInitials(participant.participantId, participantNicknames)}
+          </span>
+        ))}
+        {overflowCount > 0 ? (
+          <span className="-ml-2.5 flex size-9 items-center justify-center rounded-full border-2 border-card bg-secondary text-[11px] font-semibold text-muted-foreground">
+            +{overflowCount}
+          </span>
+        ) : null}
+      </span>
+
+      <span className="flex items-center gap-1.5 pr-2 text-xs font-medium text-muted-foreground">
+        {participantCount} online
+        <ChevronIcon className={cn('transition-transform duration-200', isOpen && 'rotate-180')} />
+      </span>
+    </button>
+  )
+})
+
 interface ParticipantsRosterProps {
   participants: Participant[]
   participantId: string | null
   participantNicknames: Record<string, string>
   isLocalUserHost: boolean
   onKickParticipant: (targetParticipantId: string) => void
+  getTone: (participantId: string) => ParticipantTone
 }
 
-const ParticipantsRoster = memo(function ParticipantsRoster({ participants, participantId, participantNicknames, isLocalUserHost, onKickParticipant }: ParticipantsRosterProps) {
+const ParticipantsRoster = memo(function ParticipantsRoster({ participants, participantId, participantNicknames, isLocalUserHost, onKickParticipant, getTone }: ParticipantsRosterProps) {
   return (
-    <ul className="vapor-scroll flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-md border border-white/15 bg-background/35 p-3">
+    <ul className="vapor-scroll flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-2xl border border-border bg-background/45 p-3">
       {participants.map((participant) => {
         const isLocalUser = participant.participantId === participantId
         const roleText = participant.isHost ? 'Host' : null
-        const toneClassName = getParticipantTone(participant.participantId)
+        const tone = getTone(participant.participantId)
         const rawName = participantNicknames[participant.participantId] ?? displayParticipantId(participant.participantId)
         const displayName = isLocalUser && participant.isHost
           ? 'You (Host)'
@@ -84,14 +200,14 @@ const ParticipantsRoster = memo(function ParticipantsRoster({ participants, part
         return (
           <li
             key={participant.participantId}
-            className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/20 bg-background/55 px-2.5 py-1.5"
+            className="inline-flex max-w-full items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1.5"
           >
-            <span className={cn('rounded-full border px-2 py-0.5 text-[11px] tracking-wide', toneClassName)} title={participant.participantId}>
+            <span className={cn('rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-wide', tone.chip)} title={participant.participantId}>
               {displayName}
             </span>
 
             {roleText ? (
-              <span className="rounded-full border border-white/25 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <span className="rounded-full bg-foreground/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em] text-background">
                 {roleText}
               </span>
             ) : null}
@@ -100,7 +216,7 @@ const ParticipantsRoster = memo(function ParticipantsRoster({ participants, part
               <button
                 type="button"
                 onClick={() => onKickParticipant(participant.participantId)}
-                className="rounded-full border border-rose-500/40 bg-rose-500/10 px-1.5 py-0.5 text-[10px] text-rose-400 hover:bg-rose-500/25 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-500"
+                className="rounded-full border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-destructive"
                 aria-label={`Remove ${rawName} from room`}
               >
                 Remove
@@ -117,9 +233,10 @@ interface MessageFeedProps {
   chatMessages: ChatMessage[]
   participantNicknames: Record<string, string>
   participantId: string | null
+  getTone: (participantId: string) => ParticipantTone
 }
 
-const MessageFeed = memo(function MessageFeed({ chatMessages, participantNicknames, participantId }: MessageFeedProps) {
+const MessageFeed = memo(function MessageFeed({ chatMessages, participantNicknames, participantId, getTone }: MessageFeedProps) {
   const feedEndRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -128,56 +245,58 @@ const MessageFeed = memo(function MessageFeed({ chatMessages, participantNicknam
 
   if (chatMessages.length === 0) {
     return (
-      <div className="flex h-[min(58vh,32rem)] min-h-72 items-center justify-center rounded-md border border-white/20 bg-background/35 p-3">
+      <div className="flex min-h-32 flex-1 items-center justify-center rounded-2xl border border-border bg-background/45 p-3">
         <p className="text-center text-xs text-muted-foreground">No messages yet. Say hi when peer channels connect.</p>
       </div>
     )
   }
 
   return (
-    <div className="vapor-scroll h-[min(58vh,32rem)] min-h-72 overflow-y-auto rounded-md border border-white/20 bg-background/35 p-3">
-      <ul className="grid gap-2">
+    <div className="vapor-scroll min-h-32 flex-1 overflow-y-auto rounded-2xl border border-border bg-background/45 p-3">
+      <ul className="grid gap-3">
         {chatMessages.map((message) => {
           if (message.direction === 'system') {
             return (
               <li key={message.messageId} className="flex items-center gap-2 py-0.5">
-                <div className="h-px flex-1 bg-white/10" />
-                <span className="text-[11px] text-muted-foreground/70">{message.text}</span>
-                <div className="h-px flex-1 bg-white/10" />
+                <div className="h-px flex-1 bg-border" />
+                <span className="text-[11px] text-muted-foreground">{message.text}</span>
+                <div className="h-px flex-1 bg-border" />
               </li>
             )
           }
 
           const isOutgoing = message.direction === 'outgoing'
           const senderName = participantNicknames[message.senderParticipantId] ?? displayParticipantId(message.senderParticipantId)
+          const outgoingLabel = participantId && participantNicknames[participantId]
+            ? `You (${participantNicknames[participantId]})`
+            : 'You'
 
           return (
             <li
               key={message.messageId}
-              className={
-                isOutgoing
-                  ? 'ml-auto max-w-[85%] rounded-xl border border-primary/50 bg-primary/20 px-3 py-2 text-sm'
-                  : 'mr-auto max-w-[85%] rounded-xl border border-white/20 bg-background/70 px-3 py-2 text-sm'
-              }
+              className={cn('flex min-w-0 max-w-[85%] flex-col gap-1', isOutgoing ? 'ml-auto items-end' : 'mr-auto items-start')}
             >
-              <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <p className="px-1 text-[11px] text-muted-foreground">
                 {isOutgoing ? (
-                  participantId && participantNicknames[participantId]
-                    ? `You (${participantNicknames[participantId]})`
-                    : 'You'
+                  <span className="font-semibold">{outgoingLabel}</span>
                 ) : (
-                  <span
-                    className={cn(
-                      'inline-flex rounded-full border px-2 py-0.5 text-[10px] normal-case tracking-normal',
-                      getParticipantTone(message.senderParticipantId),
-                    )}
-                    title={message.senderParticipantId}
-                  >
+                  <span className={cn('font-semibold', getTone(message.senderParticipantId).name)} title={message.senderParticipantId}>
                     {senderName}
                   </span>
                 )}
+                <span aria-hidden="true"> · </span>
+                {formatMessageTime(message.sentAtMs)}
               </p>
-              <p className="whitespace-pre-wrap break-words">{message.text}</p>
+              <p
+                className={cn(
+                  'max-w-full whitespace-pre-wrap [overflow-wrap:anywhere] rounded-2xl px-4 py-2.5 text-sm',
+                  isOutgoing
+                    ? 'rounded-tr-md bg-bubble-out text-bubble-out-foreground'
+                    : 'rounded-tl-md border border-border bg-card shadow-xs',
+                )}
+              >
+                {message.text}
+              </p>
             </li>
           )
         })}
@@ -222,12 +341,14 @@ const DiagnosticsOverlay = memo(function DiagnosticsOverlay() {
           bitrateTxKbps: null,
         }
 
+        const stateText = typeof detail.state === 'string' ? detail.state : '—'
+
         if (detail.kind === 'peer_connection_state') {
-          return { ...prev, [peerId]: { ...existing, connectionState: String(detail.state ?? '—') } }
+          return { ...prev, [peerId]: { ...existing, connectionState: stateText } }
         }
 
         if (detail.kind === 'data_channel_state') {
-          return { ...prev, [peerId]: { ...existing, channelState: String(detail.state ?? '—') } }
+          return { ...prev, [peerId]: { ...existing, channelState: stateText } }
         }
 
         if (detail.kind === 'bitrate_stats') {
@@ -320,7 +441,7 @@ const SoloWaitingChip = memo(function SoloWaitingChip({ soloHostDeadlineAt }: { 
   if (!soloWaitingChipText) return null
 
   return (
-    <span className="rounded-full border border-amber-300/60 bg-amber-200/15 px-2 py-1 text-[10px] font-medium text-amber-100">
+    <span className="rounded-full border border-warning-line bg-warning px-2.5 py-1 text-[11px] font-medium text-warning-foreground">
       {soloWaitingChipText}
     </span>
   )
@@ -359,7 +480,7 @@ const RoomLifetimeChip = memo(function RoomLifetimeChip({ expiresAt }: { expires
   if (!text) return null
 
   return (
-    <span className="rounded-full border border-white/20 bg-white/5 px-2 py-1 text-[10px] font-medium text-muted-foreground">
+    <span className="rounded-full border border-border bg-secondary/60 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
       {text}
     </span>
   )
@@ -379,7 +500,7 @@ const LockOpenIcon = () => (
 
 const RoomSecurityIndicator = memo(function RoomSecurityIndicator({ hasPassword }: { hasPassword: boolean }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-white/20 bg-white/5 px-2 py-1 text-[10px] font-medium text-muted-foreground">
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/60 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
       {hasPassword ? <LockClosedIcon /> : <LockOpenIcon />}
       {hasPassword ? 'Protected' : 'Open'}
     </span>
@@ -411,6 +532,31 @@ export const RoomView = memo(function RoomView({
   const isLocalUserHost = useMemo(
     () => participants.some((p) => p.participantId === participantId && p.isHost),
     [participants, participantId],
+  )
+
+  // Collision-aware tone assignment: each active participant gets a unique tone.
+  // The hash selects a preferred tone; linear probing resolves conflicts so no
+  // two participants share a color regardless of room size or hash collisions.
+  const participantToneMap = useMemo((): Map<string, ParticipantTone> => {
+    const map = new Map<string, ParticipantTone>()
+    const used = new Set<number>()
+    for (const p of participants) {
+      let idx = hashParticipantId(p.participantId) % PARTICIPANT_TONES.length
+      while (used.has(idx)) {
+        idx = (idx + 1) % PARTICIPANT_TONES.length
+      }
+      used.add(idx)
+      map.set(p.participantId, PARTICIPANT_TONES[idx])
+    }
+    return map
+  }, [participants])
+
+  // For message history: departed senders aren't in participantToneMap, so fall
+  // back to the pure hash (they no longer conflict with active participants).
+  const getTone = useCallback(
+    (pid: string): ParticipantTone =>
+      participantToneMap.get(pid) ?? PARTICIPANT_TONES[hashParticipantId(pid) % PARTICIPANT_TONES.length],
+    [participantToneMap],
   )
   const [localChatDraft, setLocalChatDraft] = useState(chatDraft)
   const [isDiagnosticsVisible, setIsDiagnosticsVisible] = useState(false)
@@ -464,46 +610,47 @@ export const RoomView = memo(function RoomView({
 
   return (
     <>
-    <Card className="relative z-10 w-full max-w-4xl border-white/30 bg-card/75 backdrop-blur-md">
-      <CardHeader className="space-y-3">
+    <Card className="vapor-app-frame relative z-10 flex flex-col">
+      <CardHeader className="gap-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
-            <CardTitle className="text-lg sm:text-xl">Room {activeRoomId}</CardTitle>
-            <CardDescription>{roomStatus}</CardDescription>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Session ID</p>
+            <CardTitle className="font-display mt-1.5 text-xl font-semibold break-all sm:text-2xl">#{activeRoomId}</CardTitle>
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <RoomSecurityIndicator hasPassword={hasPassword} />
-            <SoloWaitingChip soloHostDeadlineAt={soloHostDeadlineAt} />
-            <RoomLifetimeChip expiresAt={expiresAt} />
-            <Button type="button" variant="ghost" size="sm" onClick={onCopyRoomId}>
-              Copy room ID
-            </Button>
-          </div>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-status px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-status-foreground">
+            <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-status-foreground" />
+            {roomStatus}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <RoomSecurityIndicator hasPassword={hasPassword} />
+          <SoloWaitingChip soloHostDeadlineAt={soloHostDeadlineAt} />
+          <RoomLifetimeChip expiresAt={expiresAt} />
+          <Button type="button" variant="ghost" size="sm" onClick={() => { void onCopyRoomId() }} aria-label="Copy room ID" className="ml-auto">
+            <CopyIcon />
+            Copy ID
+          </Button>
         </div>
       </CardHeader>
 
-      <CardContent className="grid gap-4">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
         <p className="min-h-4 text-xs text-muted-foreground" aria-live="polite">
           {copyFeedback ?? ' '}
         </p>
 
-        <section className="grid gap-3 rounded-md border border-white/20 bg-background/25 p-3" aria-label="Room participants">
+        <section className="grid gap-3" aria-label="Room participants">
           <h2 className="sr-only">Participants</h2>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-muted-foreground">{participantCount}/5 participants</p>
 
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-expanded={isParticipantListOpen}
-              aria-controls="participants-roster"
-              onClick={() => setIsParticipantListOpen((previous) => !previous)}
-            >
-              {isParticipantListOpen ? 'Hide participants' : 'Show participants'}
-            </Button>
-          </div>
+          <AvatarStack
+            participants={participants}
+            participantNicknames={participantNicknames}
+            participantCount={participantCount}
+            isOpen={isParticipantListOpen}
+            onToggle={() => setIsParticipantListOpen((previous) => !previous)}
+            getTone={getTone}
+          />
 
           <div
             className={cn(
@@ -513,27 +660,27 @@ export const RoomView = memo(function RoomView({
           >
             <div className="overflow-hidden">
               <div id="participants-roster" className={cn(!isParticipantListOpen && 'pointer-events-none')}>
-                <ParticipantsRoster participants={participants} participantId={participantId} participantNicknames={participantNicknames} isLocalUserHost={isLocalUserHost} onKickParticipant={onKickParticipant} />
+                <ParticipantsRoster participants={participants} participantId={participantId} participantNicknames={participantNicknames} isLocalUserHost={isLocalUserHost} onKickParticipant={onKickParticipant} getTone={getTone} />
               </div>
             </div>
           </div>
         </section>
 
-        <section className="grid gap-3" aria-label="Peer chat">
+        <section className="flex min-h-0 flex-1 flex-col gap-3" aria-label="Peer chat">
           <h2 className="sr-only">Private peer chat</h2>
           <p className="text-xs text-muted-foreground" aria-live="polite">
             {chatStatusText}
           </p>
 
-          <MessageFeed chatMessages={chatMessages} participantNicknames={participantNicknames} participantId={participantId} />
+          <MessageFeed chatMessages={chatMessages} participantNicknames={participantNicknames} participantId={participantId} getTone={getTone} />
 
           {typingText && (
-            <p className="min-h-4 text-xs text-muted-foreground/70" aria-live="polite">
+            <p className="min-h-4 text-xs text-muted-foreground italic" aria-live="polite">
               {typingText}
             </p>
           )}
 
-          <form className="flex gap-2" onSubmit={handleChatSubmit}>
+          <form className="flex items-center gap-2" onSubmit={handleChatSubmit}>
             <label htmlFor="chat-input" className="sr-only">
               Send a private chat message
             </label>
@@ -542,17 +689,22 @@ export const RoomView = memo(function RoomView({
               value={localChatDraft}
               maxLength={500}
               onChange={handleInputChange}
-              placeholder="Type a private message"
+              placeholder="Type a secure message…"
               autoComplete="off"
-              className="h-11"
             />
-            <Button type="submit" variant="secondary" className="h-11 min-w-20" disabled={sendDisabled}>
-              Send
+            <Button
+              type="submit"
+              size="icon"
+              aria-label="Send message"
+              disabled={sendDisabled}
+              className="shrink-0 bg-foreground text-background hover:bg-foreground/90"
+            >
+              <SendIcon />
             </Button>
           </form>
         </section>
 
-        <Button type="button" onClick={onLeaveRoom}>
+        <Button type="button" variant="destructive" className="w-full font-semibold" onClick={onLeaveRoom}>
           Leave room
         </Button>
       </CardContent>

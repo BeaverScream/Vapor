@@ -88,7 +88,7 @@ function ReportControls({ token, range }: ReportControlsProps) {
         {REPORT_TYPES.map((type) => (
           <button
             key={type}
-            onClick={() => handleTrigger(type)}
+            onClick={() => void handleTrigger(type)}
             disabled={reportStatus[type] === 'loading'}
             className={btnClass(reportStatus[type])}
           >
@@ -96,7 +96,7 @@ function ReportControls({ token, range }: ReportControlsProps) {
           </button>
         ))}
         <button
-          onClick={handleCsvExport}
+          onClick={() => void handleCsvExport()}
           disabled={csvStatus === 'loading'}
           className={btnClass(csvStatus)}
         >

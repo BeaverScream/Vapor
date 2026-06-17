@@ -1,7 +1,5 @@
 # Vapor Privacy Policy
 
-**Effective as of launch · Last updated March 2026**
-
 ---
 
 ## The Core Principle
@@ -37,54 +35,9 @@ For the lifetime of an active room, the following data is held in memory only:
 
 ---
 
-## Password Handling
-
-Room passwords are hashed on the server using **Argon2id + per-room salt + server pepper** immediately on receipt. The plaintext password is never logged or retained anywhere. If the server restarts, the hash is gone — a new room and password are required.
-
----
-
-## Abuse Prevention
-
-To protect rooms from brute-force and burst abuse without storing long-term identity data, Vapor uses RAM-only rate limits and temporary blocks.
-
-- No persistent identity tracking.
-- No strict room-specific join lockout policy in the canonical design.
-- Rate-limit counters and temporary block records are RAM-only, keyed by request context such as IP/window, and expire on their own cadence or process restart.
-
----
-
 ## Chat and File Transfer
 
-Once WebRTC negotiation completes, all chat messages and file transfers flow **directly between participants** over an encrypted WebRTC data channel (DTLS/SRTP). The server is completely bypassed and cannot read your content.
-
----
-
-## Transport Encryption
-
-- **Client ↔ Signaling server:** Encrypted via HTTPS / WSS (TLS).
-- **Peer ↔ Peer (content):** Encrypted via WebRTC DTLS/SRTP.
-
----
-
-## Rate Limiting and Abuse Prevention
-
-To prevent abuse, Vapor tracks room creation and join-attempt rates against best-effort keys (such as IP address and request window). These counters are:
-- RAM-only.
-- Not tied to any persistent identity.
-- Not shared with third parties.
-- Purged when the room they belong to is destroyed.
-
----
-
-## Server Logs
-
-Operational logs may capture connection events (socket IDs, room lifecycle events) for debugging. Logs must **never** contain:
-- Passwords or password hashes.
-- Reconnect tokens.
-- SDP / ICE payloads.
-- Any user-generated message or file content.
-
-This is enforced by server policy.
+Once WebRTC negotiation completes, all chat messages and file transfers flow **directly between participants** over an encrypted WebRTC data channel. The server is completely bypassed and cannot read your content.
 
 ---
 
@@ -122,7 +75,3 @@ To monitor service health and detect abuse, Vapor writes **aggregate operational
 ## Changes to This Policy
 
 Material changes will be reflected with an updated date above. Because Vapor collects no accounts or contact information, we cannot notify you directly — check this page for updates.
-
----
-
-**See also:** [Vapor FAQ.md](./faq.md) · [Vapor System Design.md](../../docs/system_design/Vapor%20System%20Design.md)

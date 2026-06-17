@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import vaporMark from './assets/vapor-mark.svg'
 import { FAQPage } from './features/info/FAQPage'
 import { PrivacyPolicyPage } from './features/info/PrivacyPolicyPage'
 import { LobbyView } from './features/room/LobbyView'
@@ -6,6 +7,9 @@ import { RoomEndedView } from './features/room/RoomEndedView'
 import { RoomView } from './features/room/RoomView'
 import { useVaporRoom } from './features/room/useVaporRoom'
 import { AdminDashboard } from './features/admin/AdminDashboard'
+import { cn } from './lib/utils'
+import { useTheme } from './lib/useTheme'
+import { THEME_IDS, THEME_META, type ThemeId } from './lib/theme'
 
 type Page = 'app' | 'privacy' | 'faq' | 'admin'
 
@@ -18,6 +22,7 @@ function pathToPage(pathname: string): Page {
 
 function App() {
   const { state, actions, derived } = useVaporRoom()
+  const { theme, setTheme } = useTheme()
   const [page, setPage] = useState<Page>(() => pathToPage(window.location.pathname))
 
   useEffect(() => {
@@ -46,7 +51,7 @@ function App() {
     return (
       <main className="relative flex min-h-dvh justify-center overflow-hidden px-4">
         <div className="vapor-smoke-layer" aria-hidden="true" />
-        <NavBar onPrivacy={() => navigate('/privacy-policy', 'privacy')} onFaq={() => navigate('/faq', 'faq')} />
+        <NavBar onPrivacy={() => navigate('/privacy-policy', 'privacy')} onFaq={() => navigate('/faq', 'faq')} theme={theme} onThemeChange={setTheme} />
         <PrivacyPolicyPage onBack={() => navigate('/', 'app')} />
       </main>
     )
@@ -56,7 +61,7 @@ function App() {
     return (
       <main className="relative flex min-h-dvh justify-center overflow-hidden px-4">
         <div className="vapor-smoke-layer" aria-hidden="true" />
-        <NavBar onPrivacy={() => navigate('/privacy-policy', 'privacy')} onFaq={() => navigate('/faq', 'faq')} />
+        <NavBar onPrivacy={() => navigate('/privacy-policy', 'privacy')} onFaq={() => navigate('/faq', 'faq')} theme={theme} onThemeChange={setTheme} />
         <FAQPage onBack={() => navigate('/', 'app')} />
       </main>
     )
@@ -67,7 +72,7 @@ function App() {
       <h1 className="sr-only">Vapor: Secure Temporary Rooms for Real-Time Collaboration</h1>
       <p className="sr-only">Connection secure visual atmosphere active.</p>
       <div className="vapor-smoke-layer" aria-hidden="true" />
-      <NavBar onPrivacy={() => navigate('/privacy-policy', 'privacy')} onFaq={() => navigate('/faq', 'faq')} />
+      <NavBar onPrivacy={() => navigate('/privacy-policy', 'privacy')} onFaq={() => navigate('/faq', 'faq')} theme={theme} onThemeChange={setTheme} />
 
       {state.screen === 'lobby' && (
         <LobbyView
@@ -116,35 +121,79 @@ function App() {
         <RoomEndedView message={state.roomEndedMessage} onBackToLobby={actions.backToLobby} />
       ) : null}
 
-      <p className="pointer-events-none fixed bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/20 bg-background/70 px-3 py-1 text-xs text-muted-foreground backdrop-blur">
-        {derived.connectionText}
-      </p>
+      {state.screen === 'lobby' ? (
+        <p className="pointer-events-none fixed bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-card/85 px-4 py-1.5 text-[10px] font-semibold tracking-[0.14em] uppercase text-muted-foreground backdrop-blur">
+          <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-current" />
+          {derived.connectionText}
+        </p>
+      ) : null}
     </main>
   )
 }
 
-function NavBar({ onPrivacy, onFaq }: { onPrivacy: () => void; onFaq: () => void }) {
+interface NavBarProps {
+  onPrivacy: () => void
+  onFaq: () => void
+  theme: ThemeId
+  onThemeChange: (theme: ThemeId) => void
+}
+
+function NavBar({ onPrivacy, onFaq, theme, onThemeChange }: NavBarProps) {
   return (
-    <header className="fixed inset-x-0 top-0 z-20 flex justify-center px-4 pt-4">
-      <nav
-        aria-label="Primary"
-        className="flex items-center gap-3 rounded-full border border-white/25 bg-background/60 px-4 py-1 text-xs text-muted-foreground backdrop-blur-md"
-      >
-        <span className="font-medium uppercase tracking-[0.28em]">Vapor</span>
-        <button
-          onClick={onPrivacy}
-          className="cursor-pointer hover:text-foreground focus-visible:text-foreground"
-        >
-          Privacy Policy
-        </button>
-        <button
-          onClick={onFaq}
-          className="cursor-pointer hover:text-foreground focus-visible:text-foreground"
-        >
-          FAQ
-        </button>
+    <header className="fixed inset-x-0 top-0 z-20 border-b border-border bg-card/80 backdrop-blur-md">
+      <nav aria-label="Primary" className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-2.5">
+        <span className="flex items-center gap-2.5">
+          <img src={vaporMark} alt="" aria-hidden="true" className="size-7 rounded-lg" />
+          <span className="font-display text-base font-semibold tracking-[0.22em] text-foreground">VAPOR</span>
+        </span>
+        <span className="flex items-center gap-4 text-xs text-muted-foreground">
+          <button
+            onClick={onPrivacy}
+            className="cursor-pointer hover:text-foreground focus-visible:text-foreground"
+          >
+            Privacy Policy
+          </button>
+          <button
+            onClick={onFaq}
+            className="cursor-pointer hover:text-foreground focus-visible:text-foreground"
+          >
+            FAQ
+          </button>
+          <ThemeSwitcher theme={theme} onThemeChange={onThemeChange} />
+        </span>
       </nav>
     </header>
+  )
+}
+
+function ThemeSwitcher({ theme, onThemeChange }: { theme: ThemeId; onThemeChange: (theme: ThemeId) => void }) {
+  return (
+    <div role="group" aria-label="Theme" className="flex items-center gap-1 rounded-full border border-border bg-secondary/60 p-1">
+      {THEME_IDS.map((id) => {
+        const meta = THEME_META[id]
+        const isActive = theme === id
+        return (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onThemeChange(id)}
+            aria-pressed={isActive}
+            aria-label={`${meta.label} theme`}
+            title={meta.description}
+            className={cn(
+              'flex size-6 cursor-pointer items-center justify-center rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              isActive && 'ring-2 ring-ring ring-offset-1 ring-offset-card',
+            )}
+          >
+            <span
+              aria-hidden="true"
+              className="size-3.5 rounded-full border border-foreground/20"
+              style={{ background: meta.swatch }}
+            />
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

@@ -9,9 +9,9 @@ interface RoomEndedViewProps {
 
 export const RoomEndedView = memo(function RoomEndedView({ message, onBackToLobby }: RoomEndedViewProps) {
   return (
-    <Card className="relative z-10 w-full max-w-md border-white/30 bg-card/75 backdrop-blur-md">
+    <Card className="relative z-10 w-full max-w-[26rem] text-center">
       <CardHeader>
-        <CardTitle>Room ended</CardTitle>
+        <CardTitle className="font-display text-xl font-semibold">Room ended</CardTitle>
         <CardDescription>{message}</CardDescription>
       </CardHeader>
       <CardContent>

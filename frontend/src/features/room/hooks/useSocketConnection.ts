@@ -39,13 +39,15 @@ export function useSocketConnection(
   onDispose: () => void,
 ): void {
   const handlersRef = useRef(handlers)
-  handlersRef.current = handlers
-
   const onDisposeRef = useRef(onDispose)
-  onDisposeRef.current = onDispose
 
   useEffect(() => {
-    const socket = createSocketClientRef.current!()
+    handlersRef.current = handlers
+    onDisposeRef.current = onDispose
+  })
+
+  useEffect(() => {
+    const socket = createSocketClientRef.current()
     socketRef.current = socket
 
     const onConnect = (): void => handlersRef.current.onConnect()
@@ -98,6 +100,4 @@ export function useSocketConnection(
       socketRef.current = null
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  return socketRef
 }

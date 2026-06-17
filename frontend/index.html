@@ -5,6 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/vapor.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>frontend</title>
+    <!-- Bind the persisted theme before first paint to avoid a flash (VP-7.2).
+         sessionStorage only; allowlist must mirror THEME_IDS in src/lib/theme.ts. -->
+    <script>
+      (function () {
+        try {
+          var t = sessionStorage.getItem('vapor.theme')
+          document.documentElement.setAttribute(
+            'data-theme',
+            t === 'light' || t === 'dark' || t === 'blue' ? t : 'blue',
+          )
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'blue')
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

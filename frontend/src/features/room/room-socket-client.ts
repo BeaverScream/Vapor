@@ -10,11 +10,6 @@ import {
   type LeaveRoomRequest,
   type NicknameUpdatedPayload,
   type ParticipantKickedPayload,
-  type PeerJoinedPayload,
-  type PeerLeftPayload,
-  type RoomCreatedPayload,
-  type RoomDestroyedPayload,
-  type RoomJoinedPayload,
   type RoomSocketClient,
   type ResumeSessionRequest,
   type SignalAnswerRelayPayload,
@@ -23,7 +18,6 @@ import {
   type SignalIceRequest,
   type SignalOfferRelayPayload,
   type SignalOfferRequest,
-  type SocketErrorPayload,
 } from './types'
 
 export function createRoomSocketClient(signalingUrl: string = SIGNALING_URL): RoomSocketClient {
@@ -31,7 +25,9 @@ export function createRoomSocketClient(signalingUrl: string = SIGNALING_URL): Ro
     transports: ['websocket'],
   })
 
-  socket.io.on('pong', (latencyMs: number) => {
+  // 'pong' is emitted by the manager at runtime but absent from the v4 typed
+  // reserved-event map, so the listener registration needs a loose cast.
+  ;(socket.io.on as (event: string, listener: (latencyMs: number) => void) => void)('pong', (latencyMs: number) => {
     window.dispatchEvent(new CustomEvent('vapor:socket-latency', { detail: { latencyMs } }))
   })
 

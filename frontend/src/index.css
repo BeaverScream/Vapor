@@ -1,24 +1,229 @@
 @import "tailwindcss";
+@import "@fontsource-variable/sora";
+@import "@fontsource-variable/dm-sans";
 
-:root {
-  --background: oklch(0.13 0.03 252);
-  --foreground: oklch(0.95 0.02 243);
-  --card: oklch(0.2 0.03 251 / 70%);
-  --card-foreground: oklch(0.95 0.02 243);
-  --primary: oklch(0.62 0.14 243);
-  --primary-foreground: oklch(0.99 0.01 243);
-  --secondary: oklch(0.28 0.04 247);
-  --secondary-foreground: oklch(0.95 0.02 243);
-  --muted: oklch(0.25 0.03 247);
-  --muted-foreground: oklch(0.86 0.03 245);
-  --accent: oklch(0.3 0.05 240);
-  --accent-foreground: oklch(0.96 0.02 243);
-  --destructive: oklch(0.63 0.2 25);
-  --destructive-foreground: oklch(0.98 0.01 243);
-  --border: oklch(0.9 0.03 244 / 30%);
-  --input: oklch(0.9 0.03 244 / 35%);
-  --ring: oklch(0.72 0.11 238);
-  --radius: 0.75rem;
+/*
+ * Custom variant targeting the single light theme. Per-participant identity
+ * tones (RoomView `PARTICIPANT_TONES`) carry a light-on-dark ink by default
+ * (for the dark/blue fields, blue being the default theme) and override to a
+ * dark-on-light ink under `[data-theme='light']`, so nicknames stay WCAG-AA
+ * readable on every theme's surface. `data-theme` lives on <html>.
+ */
+@custom-variant theme-light ([data-theme='light'] &);
+
+/*
+ * Theme foundation (Phase 7, D-5 / D-6).
+ *
+ * Every theme-dependent value lives in a --vapor-* custom property declared
+ * under [data-theme]. `blue` is the default theme and backs :root so surfaces
+ * render coherently before the data-theme attribute is bound; the light and
+ * dark themes override only the --vapor-* block. The attribute is set on <html>
+ * (document root), so the swap is global across every page.
+ */
+
+/*
+ * Blue theme (default) — a deep #006699-based field with near-white ink.
+ * Backs :root, so it is also the pre-binding fallback. Must be declared before
+ * the other theme blocks so their attribute selectors override its :root match.
+ * Foreground + surfaces are overridden together so WCAG AA holds (D-6 / 7.2.2).
+ */
+:root,
+[data-theme='blue'] {
+  --vapor-field-glow: oklch(0.3 0.06 233);
+  --vapor-field-mid: oklch(0.24 0.055 233);
+  --vapor-field-deep: oklch(0.18 0.05 234);
+
+  --vapor-ink: oklch(0.97 0.01 220);
+  --vapor-ink-soft: oklch(0.8 0.025 225);
+
+  --vapor-surface: oklch(0.31 0.05 233 / 88%);
+  --vapor-tint: oklch(0.37 0.055 233);
+  --vapor-tint-strong: oklch(0.43 0.06 233);
+  --vapor-input-fill: oklch(0.33 0.05 233 / 72%);
+
+  --vapor-brand: oklch(0.5 0.11 233);
+  --vapor-brand-foreground: oklch(0.99 0.005 220);
+
+  --vapor-danger: oklch(0.66 0.18 18);
+  --vapor-danger-foreground: oklch(0.16 0.02 20);
+
+  --vapor-line: oklch(0.44 0.045 233 / 55%);
+  --vapor-input-line: oklch(0.5 0.05 233);
+  --vapor-ring: oklch(0.62 0.1 233);
+  --vapor-shadow: oklch(0.06 0.04 235 / 60%);
+
+  --vapor-smoke-glow-1: oklch(0.42 0.07 233 / 0.4);
+  --vapor-smoke-glow-2: oklch(0.4 0.06 236 / 0.28);
+  --vapor-smoke-glow-3: oklch(0.38 0.05 240 / 0.2);
+  --vapor-smoke-wisp-1: oklch(0.48 0.05 233 / 0.26);
+  --vapor-smoke-wisp-2: oklch(0.46 0.05 235 / 0.22);
+  --vapor-smoke-wisp-3: oklch(0.44 0.05 237 / 0.18);
+
+  --vapor-scroll-track: oklch(0.31 0.05 233 / 70%);
+  --vapor-scroll-thumb: oklch(0.5 0.07 233 / 85%);
+  --vapor-scroll-thumb-strong: oklch(0.6 0.08 233 / 92%);
+
+  /* Own-message chat bubble — a saturated blue tint (not the near-white ink) so
+     outgoing bubbles read as an accent, not a harsh white block. */
+  --vapor-bubble-out: oklch(0.52 0.11 233);
+  --vapor-bubble-out-foreground: oklch(0.99 0.005 220);
+
+  /* Warning chip (solo-waiting notice) — light amber on a translucent amber
+     fill so it stays legible on the deep blue field. */
+  --vapor-warning-surface: oklch(0.72 0.13 72 / 0.16);
+  --vapor-warning-line: oklch(0.72 0.13 72 / 0.4);
+  --vapor-warning-foreground: oklch(0.86 0.12 80);
+
+  /* Status badge (room connection state) — a lifted, bright blue so the small
+     uppercase label reads on the deep blue field (mid-blue --primary is too dark
+     for text use here). */
+  --vapor-status-surface: oklch(0.6 0.1 233 / 0.18);
+  --vapor-status-foreground: oklch(0.78 0.09 233);
+}
+
+/*
+ * Light theme — soft, light mist palette (the original Stitch direction).
+ */
+[data-theme='light'] {
+  /* Page field (radial gradient stops) */
+  --vapor-field-glow: oklch(0.99 0.004 160);
+  --vapor-field-mid: oklch(0.965 0.009 180);
+  --vapor-field-deep: oklch(0.928 0.016 190);
+
+  /* Ink */
+  --vapor-ink: oklch(0.27 0.025 235);
+  --vapor-ink-soft: oklch(0.44 0.025 220);
+
+  /* Surfaces */
+  --vapor-surface: oklch(0.995 0.003 170 / 85%);
+  --vapor-tint: oklch(0.93 0.014 190);
+  --vapor-tint-strong: oklch(0.9 0.022 190);
+  --vapor-input-fill: oklch(1 0 0 / 75%);
+
+  /* Brand accents */
+  --vapor-brand: oklch(0.42 0.08 192);
+  --vapor-brand-foreground: oklch(0.99 0.005 180);
+
+  /* Destructive */
+  --vapor-danger: oklch(0.55 0.19 18);
+  --vapor-danger-foreground: oklch(0.99 0.005 20);
+
+  /* Lines, focus, shadow */
+  --vapor-line: oklch(0.86 0.014 200 / 75%);
+  --vapor-input-line: oklch(0.83 0.016 200);
+  --vapor-ring: oklch(0.52 0.09 192);
+  --vapor-shadow: oklch(0.4 0.05 220 / 16%);
+
+  /* Smoke layer hues (lower glow / drifting wisps) */
+  --vapor-smoke-glow-1: oklch(0.85 0.055 185 / 0.5);
+  --vapor-smoke-glow-2: oklch(0.87 0.045 192 / 0.3);
+  --vapor-smoke-glow-3: oklch(0.86 0.03 215 / 0.2);
+  --vapor-smoke-wisp-1: oklch(0.97 0.012 190 / 0.34);
+  --vapor-smoke-wisp-2: oklch(0.96 0.014 195 / 0.28);
+  --vapor-smoke-wisp-3: oklch(0.95 0.016 200 / 0.24);
+
+  /* Scrollbar */
+  --vapor-scroll-track: oklch(0.92 0.01 190 / 70%);
+  --vapor-scroll-thumb: oklch(0.62 0.05 200 / 85%);
+  --vapor-scroll-thumb-strong: oklch(0.52 0.06 200 / 92%);
+
+  /* Own-message chat bubble — dark slate on light ink (the Stitch reference's
+     outgoing treatment; matches the previous bg-foreground/text-background look). */
+  --vapor-bubble-out: oklch(0.27 0.025 235);
+  --vapor-bubble-out-foreground: oklch(0.965 0.009 180);
+
+  /* Warning chip (solo-waiting notice) */
+  --vapor-warning-surface: oklch(0.62 0.13 65 / 0.1);
+  --vapor-warning-line: oklch(0.62 0.13 65 / 0.3);
+  --vapor-warning-foreground: oklch(0.5 0.12 65);
+
+  /* Status badge (room connection state) — deep teal on a soft tint, readable
+     on the light surface. */
+  --vapor-status-surface: oklch(0.42 0.08 192 / 0.1);
+  --vapor-status-foreground: oklch(0.42 0.08 192);
+}
+
+/*
+ * Dark theme — deep slate field, light ink, brand accent lifted for contrast
+ * on dark surfaces. Foreground tokens are overridden together with surfaces so
+ * WCAG AA holds (D-6 / 7.2.2).
+ */
+[data-theme='dark'] {
+  --vapor-field-glow: oklch(0.28 0.018 240);
+  --vapor-field-mid: oklch(0.22 0.02 242);
+  --vapor-field-deep: oklch(0.16 0.02 248);
+
+  --vapor-ink: oklch(0.96 0.005 190);
+  --vapor-ink-soft: oklch(0.78 0.015 210);
+
+  --vapor-surface: oklch(0.3 0.02 240 / 88%);
+  --vapor-tint: oklch(0.36 0.022 240);
+  --vapor-tint-strong: oklch(0.42 0.025 240);
+  --vapor-input-fill: oklch(0.32 0.02 240 / 70%);
+
+  --vapor-brand: oklch(0.72 0.12 192);
+  --vapor-brand-foreground: oklch(0.18 0.02 245);
+
+  --vapor-danger: oklch(0.66 0.19 18);
+  --vapor-danger-foreground: oklch(0.16 0.02 20);
+
+  --vapor-line: oklch(0.46 0.02 225 / 60%);
+  --vapor-input-line: oklch(0.5 0.02 225);
+  --vapor-ring: oklch(0.72 0.12 192);
+  --vapor-shadow: oklch(0 0 0 / 55%);
+
+  --vapor-smoke-glow-1: oklch(0.45 0.06 200 / 0.4);
+  --vapor-smoke-glow-2: oklch(0.42 0.05 210 / 0.28);
+  --vapor-smoke-glow-3: oklch(0.4 0.04 230 / 0.2);
+  --vapor-smoke-wisp-1: oklch(0.5 0.03 220 / 0.26);
+  --vapor-smoke-wisp-2: oklch(0.48 0.03 225 / 0.22);
+  --vapor-smoke-wisp-3: oklch(0.46 0.03 230 / 0.18);
+
+  --vapor-scroll-track: oklch(0.3 0.02 240 / 70%);
+  --vapor-scroll-thumb: oklch(0.5 0.03 215 / 85%);
+  --vapor-scroll-thumb-strong: oklch(0.62 0.04 205 / 92%);
+
+  /* Own-message chat bubble — a muted teal-slate (not the near-white ink) so
+     outgoing bubbles stay easy on the eyes against the dark field. */
+  --vapor-bubble-out: oklch(0.48 0.06 200);
+  --vapor-bubble-out-foreground: oklch(0.98 0.005 190);
+
+  /* Warning chip (solo-waiting notice) — light amber on a translucent amber fill. */
+  --vapor-warning-surface: oklch(0.7 0.13 70 / 0.14);
+  --vapor-warning-line: oklch(0.7 0.13 70 / 0.38);
+  --vapor-warning-foreground: oklch(0.85 0.12 78);
+
+  /* Status badge (room connection state) — lifted teal so the label reads on
+     the dark slate field. */
+  --vapor-status-surface: oklch(0.72 0.12 192 / 0.16);
+  --vapor-status-foreground: oklch(0.8 0.1 195);
+}
+
+/*
+ * Semantic tokens. Re-declared under [data-theme] (not just :root) so that a
+ * theme's --vapor-* overrides on <html> re-resolve the mapping for everything
+ * on the page.
+ */
+:root,
+[data-theme] {
+  --background: var(--vapor-field-mid);
+  --foreground: var(--vapor-ink);
+  --card: var(--vapor-surface);
+  --card-foreground: var(--vapor-ink);
+  --primary: var(--vapor-brand);
+  --primary-foreground: var(--vapor-brand-foreground);
+  --secondary: var(--vapor-tint);
+  --secondary-foreground: var(--vapor-ink);
+  --muted: var(--vapor-tint);
+  --muted-foreground: var(--vapor-ink-soft);
+  --accent: var(--vapor-tint-strong);
+  --accent-foreground: var(--vapor-ink);
+  --destructive: var(--vapor-danger);
+  --destructive-foreground: var(--vapor-danger-foreground);
+  --border: var(--vapor-line);
+  --input: var(--vapor-input-line);
+  --ring: var(--vapor-ring);
+  --radius: 1rem;
 }
 
 @theme inline {
@@ -38,11 +243,45 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
+  --color-input-fill: var(--vapor-input-fill);
+  --color-bubble-out: var(--vapor-bubble-out);
+  --color-bubble-out-foreground: var(--vapor-bubble-out-foreground);
+  --color-warning: var(--vapor-warning-surface);
+  --color-warning-line: var(--vapor-warning-line);
+  --color-warning-foreground: var(--vapor-warning-foreground);
+  --color-status: var(--vapor-status-surface);
+  --color-status-foreground: var(--vapor-status-foreground);
   --color-ring: var(--ring);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: 'DM Sans Variable', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-display: 'Sora Variable', 'DM Sans Variable', system-ui, sans-serif;
+  --shadow-card: 0 24px 64px -28px var(--vapor-shadow), 0 4px 18px -8px var(--vapor-shadow);
+}
+
+/*
+ * Register the field gradient stops as typed custom properties so a theme swap
+ * can transition them smoothly (plain --vapor-* vars are not animatable). The
+ * transition lives on :root, where the data-theme attribute changes; the body
+ * gradient inherits the animating values and repaints each frame (D-6, optional
+ * smooth swap — no JS animation).
+ */
+@property --vapor-field-glow {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.3 0.06 233);
+}
+@property --vapor-field-mid {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.24 0.055 233);
+}
+@property --vapor-field-deep {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.18 0.05 234);
 }
 
 @layer base {
@@ -50,12 +289,17 @@
     @apply border-border outline-ring/50;
   }
 
+  :root {
+    transition: --vapor-field-glow 300ms ease, --vapor-field-mid 300ms ease, --vapor-field-deep 300ms ease;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
     min-width: 320px;
     margin: 0;
-    background: radial-gradient(circle at top, #1a2740 0%, #0c1426 52%, #070d18 100%);
-    font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(circle at 50% 16%, var(--vapor-field-glow) 0%, var(--vapor-field-mid) 54%, var(--vapor-field-deep) 100%);
+    font-family: var(--font-sans);
+    transition: color 300ms ease;
   }
 }
 
@@ -76,9 +320,9 @@
   opacity: 0.28;
   mix-blend-mode: screen;
   background:
-    radial-gradient(30% 18% at 50% 96%, rgba(255, 160, 120, 0.46), transparent 70%),
-    radial-gradient(24% 14% at 42% 86%, rgba(255, 144, 108, 0.25), transparent 72%),
-    radial-gradient(24% 14% at 58% 84%, rgba(123, 162, 224, 0.16), transparent 70%);
+    radial-gradient(30% 18% at 50% 96%, var(--vapor-smoke-glow-1), transparent 70%),
+    radial-gradient(24% 14% at 42% 86%, var(--vapor-smoke-glow-2), transparent 72%),
+    radial-gradient(24% 14% at 58% 84%, var(--vapor-smoke-glow-3), transparent 70%);
   animation: vapor-ember-burn 12s ease-in-out infinite;
 }
 
@@ -87,9 +331,9 @@
   opacity: 0.46;
   mix-blend-mode: screen;
   background:
-    radial-gradient(24% 34% at 34% 58%, rgba(174, 198, 233, 0.28), transparent 74%),
-    radial-gradient(22% 32% at 66% 56%, rgba(170, 194, 230, 0.24), transparent 74%),
-    radial-gradient(18% 22% at 50% 32%, rgba(135, 162, 205, 0.2), transparent 72%);
+    radial-gradient(24% 34% at 34% 58%, var(--vapor-smoke-wisp-1), transparent 74%),
+    radial-gradient(22% 32% at 66% 56%, var(--vapor-smoke-wisp-2), transparent 74%),
+    radial-gradient(18% 22% at 50% 32%, var(--vapor-smoke-wisp-3), transparent 72%);
   animation: vapor-smoke-evaporate 17s linear infinite;
 }
 
@@ -150,7 +394,7 @@ main:has(input:focus, textarea:focus) .vapor-smoke-layer::after {
 
 .vapor-scroll {
   scrollbar-width: thin;
-  scrollbar-color: oklch(0.64 0.12 242 / 88%) oklch(0.19 0.03 247 / 70%);
+  scrollbar-color: var(--vapor-scroll-thumb) var(--vapor-scroll-track);
 }
 
 .vapor-scroll::-webkit-scrollbar {
@@ -160,18 +404,53 @@ main:has(input:focus, textarea:focus) .vapor-smoke-layer::after {
 
 .vapor-scroll::-webkit-scrollbar-track {
   border-radius: 999px;
-  background: oklch(0.19 0.03 247 / 70%);
+  background: var(--vapor-scroll-track);
 }
 
 .vapor-scroll::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 999px;
-  background: linear-gradient(180deg, oklch(0.64 0.12 242 / 88%), oklch(0.56 0.1 235 / 88%));
+  background: var(--vapor-scroll-thumb);
   background-clip: padding-box;
 }
 
 .vapor-scroll::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, oklch(0.7 0.14 244 / 94%), oklch(0.61 0.12 236 / 94%));
+  background: var(--vapor-scroll-thumb-strong);
+  background-clip: padding-box;
+}
+
+/* Shared mobile "phone frame" footprint for the lobby and room panels (D-7).
+   Holds a 19.5:9 (height:width) portrait aspect on viewports tall enough to
+   honour it; on shorter screens max-height clamps the panel and the ratio
+   relaxes (width stays usable, panel is as tall as fits). */
+.vapor-app-frame {
+  width: 100%;
+  max-width: 26rem;
+  aspect-ratio: 9 / 19.5;
+  max-height: calc(100dvh - 6rem);
+}
+
+/* Auto-numbered headings for MarkdownPage content (Privacy `h2` sections,
+   FAQ `h3` questions). Numbering derives purely from document order via
+   CSS counters — the MD source never hardcodes a number. */
+.vapor-md-content {
+  counter-reset: vapor-md-section vapor-md-question;
+}
+
+.vapor-md-content h2 {
+  counter-increment: vapor-md-section;
+}
+
+.vapor-md-content h2::before {
+  content: counter(vapor-md-section) '. ';
+}
+
+.vapor-md-content h3 {
+  counter-increment: vapor-md-question;
+}
+
+.vapor-md-content h3::before {
+  content: counter(vapor-md-question) '. ';
 }
 
 .sr-only {

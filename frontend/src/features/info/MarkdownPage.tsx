@@ -16,10 +16,13 @@ interface MarkdownPageProps {
  * Generic Vapor glass-card page that renders a raw markdown string.
  *
  * Consumers import their MD asset with Vite's `?raw` suffix:
- *   import content from '../../assets/content/faq.md?raw'
+ *   import content from './faq.md?raw'
  *
  * Content updates are made exclusively in the MD file — this component
- * never needs to change for copy edits.
+ * never needs to change for copy edits. Section (`h2`) and question (`h3`)
+ * headings are auto-numbered via CSS counters scoped to `.vapor-md-content`
+ * (see index.css), so reordering/adding/removing headings in the MD needs
+ * no manual renumbering.
  */
 export function MarkdownPage({ title, subtitle, content, onBack }: MarkdownPageProps) {
   return (
@@ -33,7 +36,7 @@ export function MarkdownPage({ title, subtitle, content, onBack }: MarkdownPageP
       </button>
 
       <article
-        className="rounded-[1.75rem] border border-white/15 bg-background/72 p-5 text-[0.95rem] leading-7 text-muted-foreground shadow-[0_24px_80px_rgba(3,8,20,0.42)] backdrop-blur-xl sm:p-8 sm:text-base md:p-10 lg:p-12 lg:text-[1.05rem] lg:leading-8"
+        className="rounded-[1.75rem] bg-card p-5 text-[0.95rem] leading-7 text-muted-foreground shadow-card backdrop-blur-xl sm:p-8 sm:text-base md:p-10 lg:p-12 lg:text-[1.05rem] lg:leading-8"
         aria-label={title}
       >
         <div className="mx-auto max-w-[78ch]">
@@ -46,7 +49,7 @@ export function MarkdownPage({ title, subtitle, content, onBack }: MarkdownPageP
             </p>
           )}
 
-          <div className="mt-6 sm:mt-8">
+          <div className="vapor-md-content mt-6 sm:mt-8">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
               {content}
             </ReactMarkdown>
@@ -66,7 +69,7 @@ const mdComponents: Components = {
   h1: () => null,
 
   h2: ({ children }) => (
-    <h2 className="mb-3 mt-8 border-t border-white/10 pt-6 text-base font-semibold text-foreground first:mt-0 first:border-t-0 first:pt-0 sm:text-lg lg:text-[1.35rem]">
+    <h2 className="mb-3 mt-8 text-base font-semibold text-foreground first:mt-0 sm:text-lg lg:text-[1.35rem]">
       {children}
     </h2>
   ),
@@ -98,7 +101,7 @@ const mdComponents: Components = {
   em: ({ children }) => <em className="italic">{children}</em>,
 
   code: ({ children }) => (
-    <code className="rounded-md bg-white/10 px-1.5 py-0.5 font-mono text-[0.8rem] text-foreground sm:text-[0.875rem]">
+    <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.8rem] text-foreground sm:text-[0.875rem]">
       {children}
     </code>
   ),
@@ -110,7 +113,7 @@ const mdComponents: Components = {
     </div>
   ),
   thead: ({ children }) => (
-    <thead className="border-b border-white/20">{children}</thead>
+    <thead className="border-b border-border">{children}</thead>
   ),
   th: ({ children }) => (
     <th className="py-3 pr-4 text-left font-medium text-foreground">{children}</th>
@@ -119,12 +122,12 @@ const mdComponents: Components = {
     <td className="py-2 pr-4 align-top">{children}</td>
   ),
 
-  hr: () => <hr className="my-8 border-white/10" />,
+  hr: () => <hr className="my-8 border-border" />,
 
   a: ({ children, href }) => (
     <a
       href={href}
-      className="text-foreground underline decoration-white/30 underline-offset-4 transition-colors hover:text-foreground/80 hover:decoration-white/70"
+      className="text-foreground underline decoration-foreground/30 underline-offset-4 transition-colors hover:text-foreground/80 hover:decoration-foreground/70"
       target="_blank"
       rel="noreferrer"
     >

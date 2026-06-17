@@ -27,7 +27,9 @@ export default defineConfig([
     rules: {
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-floating-promises': ['error', { ignoreVoid: true }],
-      '@typescript-eslint/switch-exhaustiveness-check': 'error',
+      // Defensive switches over untrusted string input intentionally rely on a
+      // `default` case to cover unmodelled values; treat that as exhaustive.
+      '@typescript-eslint/switch-exhaustiveness-check': ['error', { considerDefaultExhaustiveForUnions: true }],
       eqeqeq: ['error', 'always'],
       'no-console': ['warn', { allow: ['warn', 'error'] }],
     },
