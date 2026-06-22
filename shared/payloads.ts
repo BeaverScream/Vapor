@@ -4,6 +4,7 @@ import { SIGNALING_ERROR_CODES, type SignalingErrorCode } from "./error-codes";
 export type CreateRoomPayload = {
   password?: string;
   nickname: string;
+  roomName?: string;
 };
 
 export type JoinRoomPayload = {
@@ -75,6 +76,7 @@ export type RoomCreatedPayload = {
   soloHostDeadlineAt?: number | null;
   participantCount: number;
   hasPassword?: boolean;
+  roomName?: string;
 };
 
 export type RoomJoinedPayload = {
@@ -87,6 +89,7 @@ export type RoomJoinedPayload = {
   participantNickname?: string | null;
   participantCount: number;
   hasPassword?: boolean;
+  roomName?: string;
 };
 
 export type NicknameUpdatePayload = {
@@ -109,6 +112,7 @@ export type PeerLeftPayload = {
   participantId: string;
   reason: "disconnect" | "leave";
   participantCount: number;
+  soloHostDeadlineAt?: number | null;
 };
 
 export type HostReconnectGracePayload = {

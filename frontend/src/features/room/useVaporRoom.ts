@@ -27,6 +27,7 @@ import {
   withRoomCreated,
   withRoomEnded,
   withRoomIdInput,
+  withRoomNameInput,
   withRoomJoined,
   withSocketState,
 } from './state-utils'
@@ -50,11 +51,16 @@ import type {
   SignalOfferRelayPayload,
   SocketErrorPayload,
 } from './types'
-import { useSessionPersistence } from './hooks/useSessionPersistence'
+import {
+  useSessionPersistence,
+  readStoredReconnectSession,
+  clearStoredReconnectSession,
+} from './hooks/useSessionPersistence'
 import { useJoinRateLimit } from './hooks/useJoinRateLimit'
 import { useTypingIndicator } from './hooks/useTypingIndicator'
 import { useChatMessaging, createChatMessage } from './hooks/useChatMessaging'
 import { useSocketConnection } from './hooks/useSocketConnection'
+import { useNotifications } from '../../lib/useNotifications'
 
 const COPY_FEEDBACK_MS = 1800
 
@@ -136,7 +142,9 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   const writeClipboardTextRef = useRef(writeClipboardText)
   writeClipboardTextRef.current = writeClipboardText
 
-  const [state, setState] = useState<RoomSessionState>(createInitialRoomSessionState)
+  const [state, setState] = useState<RoomSessionState>(() =>
+    createInitialRoomSessionState(readStoredReconnectSession() !== null ? 'reconnecting' : 'lobby'),
+  )
   const stateRef = useRef(state)
   stateRef.current = state
   const socketStateRef = useRef<RoomSessionState['socketState']>('connecting')
@@ -152,6 +160,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   // Sub-hooks
   const persistence = useSessionPersistence()
   const { joinRateLimitRemainingMs, isJoinRateLimited } = useJoinRateLimit(state, setState)
+  const { requestPermission, notifyNewMessage } = useNotifications()
 
   const disposePeerMesh = useCallback((): void => {
     peerMeshRef.current?.dispose()
@@ -165,10 +174,9 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     disposePeerMesh()
     chat.clearPending()
     typing.clearAll()
-    persistence.clearStoredReconnectSession()
     resumeInFlightRef.current = false
     autoResumeRequestedRef.current = false
-  }, [disposePeerMesh, chat.clearPending, typing.clearAll, persistence.clearStoredReconnectSession])
+  }, [disposePeerMesh, chat.clearPending, typing.clearAll])
 
   const createPeerMesh = useCallback(
     (roomId: string, participantId: string): VaporWebRtcChatMesh => {
@@ -183,6 +191,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
         },
         onRemoteMessage: chat.onRemoteMessage,
         onRemoteTypingStatus: typing.onRemoteTypingStatus,
+        onNewMessage: notifyNewMessage,
         onConnectedPeerCountChange: (connectedPeerCount) => {
           setState((previous) => {
             let nextState = withConnectedPeerCount(previous, connectedPeerCount)
@@ -203,7 +212,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       peerMeshRef.current = peerMesh
       return peerMesh
     },
-    [disposePeerMesh, chat.onRemoteMessage, typing.onRemoteTypingStatus, chat.flushPendingMessages],
+    [disposePeerMesh, chat.onRemoteMessage, typing.onRemoteTypingStatus, chat.flushPendingMessages, notifyNewMessage],
   )
 
   // Socket event handlers — all close over stable refs only
@@ -238,8 +247,9 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       autoResumeRequestedRef.current = false
       setState((previous) => withRoomCreated(previous, payload))
       createPeerMesh(payload.roomId, payload.participantId)
+      requestPermission()
     },
-    [persistence.writeStoredReconnectSession, createPeerMesh],
+    [persistence.writeStoredReconnectSession, createPeerMesh, requestPermission],
   )
 
   const onRoomJoined = useCallback(
@@ -253,13 +263,19 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       setState((previous) => withRoomJoined(previous, payload))
       const peerMesh = createPeerMesh(payload.roomId, payload.participantId)
       peerMesh.syncPeers(payload.peers.map((peer) => peer.participantId))
+      requestPermission()
     },
-    [persistence.writeStoredReconnectSession, createPeerMesh],
+    [persistence.writeStoredReconnectSession, createPeerMesh, requestPermission],
   )
 
   const onPeerJoined = useCallback((payload: PeerJoinedPayload): void => {
     setState((previous) => {
-      const nextState = withPeerJoined(previous, payload)
+      let nextState = withPeerJoined(previous, payload)
+      if (payload.participantId === previous.hostId && previous.hostReconnectGraceDeadlineAt !== null) {
+        nextState = { ...nextState, hostReconnectGraceDeadlineAt: null }
+      }
+      const name = payload.nickname ?? previous.participantNicknames[payload.participantId] ?? payload.participantId.slice(0, 8)
+      nextState = withAppendedChatMessage(nextState, createChatMessage(payload.participantId, `${name} joined`, 'system'))
       if (nextState.connectedPeerCount === 0 && nextState.participantCount > 1) {
         return withChatConnectionState(nextState, 'connecting')
       }
@@ -271,7 +287,12 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   const onPeerLeft = useCallback((payload: PeerLeftPayload): void => {
     peerMeshRef.current?.handlePeerLeft(payload.participantId)
     setState((previous) => {
-      let nextState = withPeerLeft(previous, payload)
+      const name = previous.participantNicknames[payload.participantId] ?? payload.participantId.slice(0, 8)
+      const action = payload.reason === 'disconnect' ? 'disconnected' : 'left'
+      let nextState = withAppendedChatMessage(withPeerLeft(previous, payload), createChatMessage(payload.participantId, `${name} ${action}`, 'system'))
+      if (payload.soloHostDeadlineAt !== undefined && payload.soloHostDeadlineAt !== null) {
+        nextState = { ...nextState, soloHostDeadlineAt: payload.soloHostDeadlineAt }
+      }
       if (nextState.participantCount <= 1) {
         chat.pendingMessagesRef.current = []
         nextState = withConnectedPeerCount(nextState, 0)
@@ -324,7 +345,10 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   const onParticipantKicked = useCallback(
     (payload: ParticipantKickedPayload): void => {
       if (payload.participantId === stateRef.current.participantId) {
+        clearStoredReconnectSession()
         clearRoomSession()
+        socketRef.current?.disconnect()
+        setTimeout(() => socketRef.current?.connect(), 0)
         setState((previous) => withKickedFromRoom(previous))
       } else {
         peerMeshRef.current?.handlePeerLeft(payload.participantId)
@@ -340,6 +364,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
 
   const onRoomDestroyed = useCallback(
     (payload: RoomDestroyedPayload): void => {
+      clearStoredReconnectSession()
       clearRoomSession()
       setState((previous) => withRoomEnded(previous, payload.reason))
     },
@@ -359,8 +384,8 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
           errorCode === SIGNALING_ERROR_CODES.INVALID_PASSWORD ||
           errorCode === SIGNALING_ERROR_CODES.RATE_LIMITED
         ) {
-          persistence.clearStoredReconnectSession()
-          return previous
+          clearStoredReconnectSession()
+          return resetToLobby(previous)
         }
       }
 
@@ -377,9 +402,17 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
         return { ...withLobbyError(previous, getErrorMessage(errorCode)), hasPassword: true }
       }
 
+      if (
+        errorCode === SIGNALING_ERROR_CODES.INVALID_SIGNAL_PAYLOAD &&
+        previous.lobbyMode === 'create' &&
+        previous.roomNameInput.trim().length > 0
+      ) {
+        return withLobbyError(previous, 'Room name already taken or invalid.')
+      }
+
       return withLobbyError(previous, getErrorMessage(errorCode))
     })
-  }, [persistence.clearStoredReconnectSession])
+  }, [])
 
   useSocketConnection(
     socketRef,
@@ -416,6 +449,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   // Stable setter callbacks
   const setLobbyMode = useCallback((mode: LobbyMode) => setState((prev) => withLobbyMode(prev, mode)), [])
   const setRoomIdInput = useCallback((value: string) => setState((prev) => withRoomIdInput(prev, value)), [])
+  const setRoomNameInput = useCallback((value: string) => setState((prev) => withRoomNameInput(prev, value)), [])
   const setPasswordInput = useCallback((value: string) => setState((prev) => withPasswordInput(prev, value)), [])
   const setNicknameInput = useCallback((value: string) => setState((prev) => withNicknameInput(prev, value)), [])
   const setChatDraft = useCallback((value: string) => setState((prev) => withChatDraft(prev, value)), [])
@@ -464,7 +498,12 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     setState((previous) => withLobbySubmitting(previous))
 
     if (s.lobbyMode === 'create') {
-      socket.emitCreateRoom({ password: s.passwordInput, nickname: trimmedNickname })
+      const trimmedRoomName = s.roomNameInput.trim()
+      socket.emitCreateRoom({
+        password: s.passwordInput,
+        nickname: trimmedNickname,
+        ...(trimmedRoomName.length > 0 ? { roomName: trimmedRoomName } : {}),
+      })
       return
     }
 
@@ -488,11 +527,13 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     if (socket && roomId) {
       socket.emitLeaveRoom({ roomId })
     }
+    clearStoredReconnectSession()
     clearRoomSession()
     setState((previous) => resetToLobby(previous))
   }, [clearRoomSession])
 
   const backToLobby = useCallback((): void => {
+    clearStoredReconnectSession()
     clearRoomSession()
     setState((previous) => resetToLobby(previous))
   }, [clearRoomSession])
@@ -517,11 +558,18 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     () => getChatStatusText(state.chatConnectionState, state.connectedPeerCount, state.participantCount),
     [state.chatConnectionState, state.connectedPeerCount, state.participantCount],
   )
+  const effectiveExpiresAt = useMemo(() => {
+    const deadlines = [state.expiresAt, state.hostReconnectGraceDeadlineAt, state.soloHostDeadlineAt].filter(
+      (d): d is number => d !== null,
+    )
+    return deadlines.length === 0 ? null : Math.min(...deadlines)
+  }, [state.expiresAt, state.hostReconnectGraceDeadlineAt, state.soloHostDeadlineAt])
 
   const actions = useMemo<RoomSessionActions>(
     () => ({
       setLobbyMode,
       setRoomIdInput,
+      setRoomNameInput,
       setPasswordInput,
       setNicknameInput,
       submitLobby,
@@ -537,6 +585,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     [
       setLobbyMode,
       setRoomIdInput,
+      setRoomNameInput,
       setPasswordInput,
       setNicknameInput,
       submitLobby,
@@ -561,8 +610,8 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       joinRateLimitHint,
       roomStatus,
       connectionText,
-      expiresAt: state.expiresAt,
-      soloHostDeadlineAt: state.soloHostDeadlineAt,
+      expiresAt: effectiveExpiresAt,
+      soloHostDeadlineAt: null,
       chatStatusText,
     },
   }

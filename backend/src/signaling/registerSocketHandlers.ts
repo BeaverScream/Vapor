@@ -28,6 +28,7 @@ import {
   removeParticipantBySocket,
   type RoomIdentityFactories,
 } from "./roomLifecycle";
+import { validateRoomName } from "./backendUtils";
 import * as passwordAuth from "./handlers/passwordAuth";
 import * as rateLimiting from "./handlers/rateLimiting";
 import type { RateLimitingContext } from "./handlers/rateLimiting";
@@ -86,6 +87,7 @@ function emitParticipantExit(
   socket: Socket,
   removed: ReturnType<typeof removeParticipantBySocket>,
   source: ExitSource,
+  extras?: { liveCount?: number; soloHostDeadlineAt?: number | null },
 ): void {
   if (!removed) return;
 
@@ -93,7 +95,8 @@ function emitParticipantExit(
     const payload: PeerLeftPayload = {
       participantId: removed.participantId,
       reason: source,
-      participantCount: removed.participantCount,
+      participantCount: extras?.liveCount ?? removed.participantCount,
+      ...(extras?.soloHostDeadlineAt != null ? { soloHostDeadlineAt: extras.soloHostDeadlineAt } : {}),
     };
     socket.to(removed.roomId).emit(signaling.SERVER_EVENTS.peerLeft, payload);
     return;
@@ -104,6 +107,14 @@ function emitParticipantExit(
       reason: "host_left",
     } as RoomDestroyedPayload);
   }
+}
+
+function getLiveParticipantCount(room: { participants: Map<string, { socketId: string }> }): number {
+  let count = 0;
+  for (const p of room.participants.values()) {
+    if (!p.socketId.startsWith("disconnected:")) count++;
+  }
+  return count;
 }
 
 export function registerSocketHandlers({
@@ -168,10 +179,6 @@ export function registerSocketHandlers({
     });
   }
 
-  const emitPeerLeftToRoom = (roomId: string, payload: PeerLeftPayload): void => {
-    io.to(roomId).emit(signaling.SERVER_EVENTS.peerLeft, payload);
-  };
-
   const clearRoomArtifacts = (roomId: string): void => {
     passwordAuth.deleteRoomAuth(authCtx, roomId);
     const policy = graceCtx.roomPolicyById.get(roomId);
@@ -210,6 +217,7 @@ export function registerSocketHandlers({
       }
       room.nicknameToParticipant.clear();
       room.participants.clear();
+      if (room.roomName) state.roomNameToId.delete(room.roomName);
     }
 
     clearReconnectForRoomFn(roomId);
@@ -253,12 +261,16 @@ export function registerSocketHandlers({
       const nowTs = now();
       metrics.incrementRoomDestroyed?.("host_grace_expired");
       metrics.updateRoomLifetimeRolling?.(nowTs - activeRoom.createdAt);
+      if (activeRoom.roomName) state.roomNameToId.delete(activeRoom.roomName);
       state.rooms.delete(roomId);
       clearRoomArtifacts(roomId);
       return;
     }
-
-    emitPeerLeftToRoom(roomId, { participantId, reason: "disconnect", participantCount });
+    io.to(roomId).emit(signaling.SERVER_EVENTS.peerLeft, {
+      participantId,
+      reason: "disconnect",
+      participantCount,
+    } as PeerLeftPayload);
   };
 
   io.on("connection", (socket) => {
@@ -291,6 +303,19 @@ export function registerSocketHandlers({
           return;
         }
 
+        let normalizedRoomName: string | undefined;
+        if (payload?.roomName !== undefined && payload.roomName !== "") {
+          const validated = validateRoomName(payload.roomName);
+          if (!validated || state.roomNameToId.has(validated)) {
+            socket.emit(signaling.SERVER_EVENTS.error, {
+              code: signaling.ERROR_CODES.invalidSignalPayload,
+              message: "Room name already taken or invalid.",
+            });
+            return;
+          }
+          normalizedRoomName = validated;
+        }
+
         const subject = rateLimiting.deriveJoinAttemptSubject(socket);
         const ip = rateLimiting.deriveIp(socket);
         const createdAt = now();
@@ -301,6 +326,11 @@ export function registerSocketHandlers({
         }
 
         const { room, participantId } = createRoomRecord(state, socket.id, createdAt, factories);
+
+        if (normalizedRoomName) {
+          room.roomName = normalizedRoomName;
+          state.roomNameToId.set(normalizedRoomName, room.roomId);
+        }
 
         const participant = room.participants.get(participantId);
         if (participant) {
@@ -338,6 +368,7 @@ export function registerSocketHandlers({
           soloHostDeadlineAt: policy.soloHostDeadlineAt,
           participantCount: room.participants.size,
           hasPassword: !!normalizedPassword,
+          roomName: normalizedRoomName,
         };
 
         socket.emit(signaling.SERVER_EVENTS.roomCreated, response);
@@ -347,14 +378,24 @@ export function registerSocketHandlers({
     socket.on(
       signaling.CLIENT_EVENTS.joinRoom,
       (payload: JoinRoomPayload | undefined) => {
-        const roomId = payload?.roomId;
-        if (!roomId) {
+        const inputRoomId = payload?.roomId;
+        if (!inputRoomId) {
           emitRoomNotFound(socket);
           return;
         }
 
+        const roomId = state.rooms.has(inputRoomId)
+          ? inputRoomId
+          : (state.roomNameToId.get(inputRoomId.toLowerCase()) ?? inputRoomId);
+
         const room = state.rooms.get(roomId);
         if (!room) {
+          emitRoomNotFound(socket);
+          return;
+        }
+
+        // Room exists but all live participants have disconnected — treat as non-existent.
+        if (getLiveParticipantCount(room) === 0) {
           emitRoomNotFound(socket);
           return;
         }
@@ -387,8 +428,21 @@ export function registerSocketHandlers({
 
         const existing = room.nicknameToParticipant.get(normalizedNickname.toLowerCase());
         if (existing) {
-          emitInvalidSignalPayload(socket);
-          return;
+          const existingParticipant = room.participants.get(existing);
+          const isDisconnected = existingParticipant?.socketId.startsWith("disconnected:") ?? false;
+          if (!isDisconnected) {
+            emitInvalidSignalPayload(socket);
+            return;
+          }
+          // The existing holder is in a disconnect grace window. Evict them so this
+          // fresh join can claim the nickname (the holder lost their reconnect token
+          // on page refresh and cannot resume).
+          // peer_left was already broadcast at disconnect time; only clean up server state
+          room.nicknameToParticipant.delete(normalizedNickname.toLowerCase());
+          room.participants.delete(existing);
+          state.participantToRoom.delete(existing);
+          clearReconnectForParticipantFn(existing);
+          reconnectCtx.disconnectedParticipants.delete(existing);
         }
 
         const auth = passwordAuth.getRoomAuth(authCtx, roomId);
@@ -438,11 +492,13 @@ export function registerSocketHandlers({
         }
 
         const policy = graceCtx.roomPolicyById.get(roomId);
-        if (policy && !policy.hasEverHadGuest) {
-          policy.hasEverHadGuest = true;
-          if (policy.soloHostTimeoutRef) clearTimeout(policy.soloHostTimeoutRef);
-          policy.soloHostTimeoutRef = undefined;
-          policy.soloHostDeadlineAt = undefined;
+        if (policy) {
+          if (!policy.hasEverHadGuest) policy.hasEverHadGuest = true;
+          if (policy.soloHostTimeoutRef) {
+            clearTimeout(policy.soloHostTimeoutRef);
+            policy.soloHostTimeoutRef = undefined;
+            policy.soloHostDeadlineAt = undefined;
+          }
         }
 
         socket.join(roomId);
@@ -450,6 +506,7 @@ export function registerSocketHandlers({
         metrics.incrementParticipantsJoined?.();
         metrics.updatePeakMarks?.();
 
+        const joinLiveCount = getLiveParticipantCount(joined.room);
         const roomJoinedPayload: RoomJoinedPayload = {
           roomId,
           participantId: joined.participantId,
@@ -458,8 +515,9 @@ export function registerSocketHandlers({
           reconnectToken,
           expiresAt: policy?.expiresAt ?? room.createdAt + signaling.ROOM_MAX_DURATION_MS,
           participantNickname: normalizedNickname,
-          participantCount: joined.room.participants.size,
+          participantCount: joinLiveCount,
           hasPassword: !isOpenRoom,
+          roomName: room.roomName,
         };
 
         socket.emit(signaling.SERVER_EVENTS.roomJoined, roomJoinedPayload);
@@ -467,7 +525,7 @@ export function registerSocketHandlers({
         const peerJoinedPayload: PeerJoinedPayload = {
           participantId: joined.participantId,
           nickname: normalizedNickname,
-          participantCount: joined.room.participants.size,
+          participantCount: joinLiveCount,
         };
 
         socket.to(roomId).emit(signaling.SERVER_EVENTS.peerJoined, peerJoinedPayload);
@@ -520,7 +578,7 @@ export function registerSocketHandlers({
             return;
           }
 
-          if (!reconnectRecord.disconnected || now() > reconnectRecord.validUntil) {
+                  if (!reconnectRecord.disconnected || now() > reconnectRecord.validUntil) {
             emitRoomNotFound(socket);
             return;
           }
@@ -566,10 +624,16 @@ export function registerSocketHandlers({
           metrics.recordRoomJoin(socket.id, roomId);
 
           const peers = Array.from(room.participants.values())
-            .filter((peer) => peer.participantId !== reconnectRecord.participantId)
+            .filter((peer) => peer.participantId !== reconnectRecord.participantId && !peer.socketId.startsWith("disconnected:"))
             .map((peer) => ({ participantId: peer.participantId, nickname: peer.nickname ?? null }));
 
+          const resumeLiveCount = getLiveParticipantCount(room);
           const policy = graceCtx.roomPolicyById.get(roomId);
+          if (resumeLiveCount >= 2 && policy?.soloHostTimeoutRef) {
+            clearTimeout(policy.soloHostTimeoutRef);
+            policy.soloHostTimeoutRef = undefined;
+            policy.soloHostDeadlineAt = undefined;
+          }
           const roomJoinedPayload: RoomJoinedPayload = {
             roomId,
             participantId: reconnectRecord.participantId,
@@ -578,11 +642,18 @@ export function registerSocketHandlers({
             reconnectToken: freshToken,
             expiresAt: policy?.expiresAt ?? room.createdAt + signaling.ROOM_MAX_DURATION_MS,
             participantNickname: participant.nickname ?? null,
-            participantCount: room.participants.size,
+            participantCount: resumeLiveCount,
             hasPassword: !!auth.passwordHash,
+            roomName: room.roomName,
           };
 
           socket.emit(signaling.SERVER_EVENTS.roomJoined, roomJoinedPayload);
+
+          socket.to(roomId).emit(signaling.SERVER_EVENTS.peerJoined, {
+            participantId: reconnectRecord.participantId,
+            nickname: participant.nickname ?? undefined,
+            participantCount: resumeLiveCount,
+          } as PeerJoinedPayload);
         });
       },
     );
@@ -766,6 +837,33 @@ export function registerSocketHandlers({
 
         clearReconnectForParticipantFn(targetParticipantId);
 
+        const remainingCount = room.participants.size;
+        let soloHostDeadlineAt: number | null = null;
+
+        if (remainingCount === 1) {
+          const policy = graceCtx.roomPolicyById.get(roomId);
+          if (policy) {
+            const nowTs = now();
+            const deadline = nowTs + signaling.SOLO_HOST_ROOM_TIMEOUT_MS;
+            if (policy.soloHostTimeoutRef) clearTimeout(policy.soloHostTimeoutRef);
+            policy.soloHostDeadlineAt = deadline;
+            policy.soloHostTimeoutRef = setTimeout(
+              () => destroyRoom(roomId, "solo_timeout_expired"),
+              signaling.SOLO_HOST_ROOM_TIMEOUT_MS,
+            );
+            policy.soloHostTimeoutRef.unref?.();
+            soloHostDeadlineAt = deadline;
+          }
+        }
+
+        const peerLeftPayload: PeerLeftPayload = {
+          participantId: targetParticipantId,
+          reason: "leave",
+          participantCount: remainingCount,
+          ...(soloHostDeadlineAt !== null ? { soloHostDeadlineAt } : {}),
+        };
+        io.to(roomId).emit(signaling.SERVER_EVENTS.peerLeft, peerLeftPayload);
+
         if (!targetSocketId.startsWith("disconnected:")) {
           const ioServer = io as unknown as {
             sockets: { sockets: Map<string, { disconnect: (close?: boolean) => void }> };
@@ -781,7 +879,25 @@ export function registerSocketHandlers({
       const leavingRoomCreatedAt = leavingRoomId ? state.rooms.get(leavingRoomId)?.createdAt : undefined;
 
       const removed = removeParticipantBySocket(state, socket.id);
-      emitParticipantExit(socket, removed, "leave");
+
+      let leaveExtras: { liveCount?: number; soloHostDeadlineAt?: number | null } | undefined;
+      if (removed?.roomStillActive) {
+        const remainingRoom = state.rooms.get(removed.roomId);
+        if (remainingRoom) {
+          const liveCount = getLiveParticipantCount(remainingRoom);
+          if (liveCount === 0) {
+            // Last live participant left; destroy the room rather than letting it linger.
+            // Leave the Socket.IO room first so the leaving socket doesn't receive room_destroyed.
+            socket.leave(removed.roomId);
+            destroyRoom(removed.roomId, "host_grace_expired");
+            metrics.recordDisconnect(socket.id);
+            return;
+          }
+          leaveExtras = { liveCount };
+        }
+      }
+
+      emitParticipantExit(socket, removed, "leave", leaveExtras);
       if (removed) clearReconnectForParticipantFn(removed.participantId);
       if (removed && !removed.roomStillActive) {
         const nowTs = now();
@@ -822,8 +938,30 @@ export function registerSocketHandlers({
           );
           if (deadlineAt !== null) {
             reconnect.markReconnectDisconnected(reconnectCtx, participantId, deadlineAt);
-            const payload: HostReconnectGracePayload = { deadlineAt };
-            socket.to(roomId).emit(signaling.SERVER_EVENTS.hostReconnectGrace, payload);
+            const liveCount = getLiveParticipantCount(room);
+            let hostSoloDeadlineAt: number | null = null;
+            if (liveCount === 1) {
+              const soloPolicy = graceCtx.roomPolicyById.get(roomId);
+              if (soloPolicy) {
+                const nowTs = now();
+                const deadline = nowTs + signaling.SOLO_HOST_ROOM_TIMEOUT_MS;
+                if (soloPolicy.soloHostTimeoutRef) clearTimeout(soloPolicy.soloHostTimeoutRef);
+                soloPolicy.soloHostDeadlineAt = deadline;
+                soloPolicy.soloHostTimeoutRef = setTimeout(
+                  () => destroyRoom(roomId, "solo_timeout_expired"),
+                  signaling.SOLO_HOST_ROOM_TIMEOUT_MS,
+                );
+                soloPolicy.soloHostTimeoutRef.unref?.();
+                hostSoloDeadlineAt = deadline;
+              }
+            }
+            socket.to(roomId).emit(signaling.SERVER_EVENTS.peerLeft, {
+              participantId,
+              reason: "disconnect",
+              participantCount: liveCount,
+              ...(hostSoloDeadlineAt !== null ? { soloHostDeadlineAt: hostSoloDeadlineAt } : {}),
+            } as PeerLeftPayload);
+            socket.to(roomId).emit(signaling.SERVER_EVENTS.hostReconnectGrace, { deadlineAt } as HostReconnectGracePayload);
           }
           metrics.recordDisconnect(socket.id);
           return;

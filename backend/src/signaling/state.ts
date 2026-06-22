@@ -13,19 +13,22 @@ export type RoomRecord = {
   participants: Map<string, ParticipantRecord>;
   nicknameToParticipant: Map<string, string>;
   createdAt: number;
+  roomName?: string;
 };
 
 export type SignalingState = {
   rooms: Map<string, RoomRecord>;
   participantToRoom: Map<string, string>;
   socketToParticipant: Map<string, string>;
+  roomNameToId: Map<string, string>;
 };
 
 export function createSignalingState(): SignalingState {
   return {
     rooms: new Map<string, RoomRecord>(),
     participantToRoom: new Map<string, string>(),
-    socketToParticipant: new Map<string, string>()
+    socketToParticipant: new Map<string, string>(),
+    roomNameToId: new Map<string, string>(),
   };
 }
 
@@ -33,6 +36,7 @@ export function resetSignalingState(state: SignalingState): void {
   state.rooms.clear();
   state.participantToRoom.clear();
   state.socketToParticipant.clear();
+  state.roomNameToId.clear();
 }
 
 export function getSignalingStateSnapshot(state: SignalingState) {

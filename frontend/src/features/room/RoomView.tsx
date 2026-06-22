@@ -8,7 +8,9 @@ import type { ChatMessage, Participant } from './types'
 
 interface RoomViewProps {
   activeRoomId: string
+  activeRoomName?: string | null
   participantId: string | null
+  hostId: string
   participantCount: number
   participants: Participant[]
   participantNicknames: Record<string, string>
@@ -121,55 +123,31 @@ const SendIcon = () => (
   </svg>
 )
 
-interface AvatarStackProps {
-  participants: Participant[]
-  participantNicknames: Record<string, string>
+const CrownIcon = () => (
+  <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12" role="img" aria-label="Host">
+    <path d="M2 12.5h12v1.5H2v-1.5zm0-1 2-6.5 4 4 4-4 2 6.5H2z" />
+  </svg>
+)
+
+interface ParticipantToggleRowProps {
   participantCount: number
   isOpen: boolean
   onToggle: () => void
-  getTone: (participantId: string) => ParticipantTone
 }
 
-const MAX_VISIBLE_AVATARS = 4
-
-const AvatarStack = memo(function AvatarStack({ participants, participantNicknames, participantCount, isOpen, onToggle, getTone }: AvatarStackProps) {
-  const visibleParticipants = participants.slice(0, MAX_VISIBLE_AVATARS)
-  const overflowCount = participants.length - visibleParticipants.length
-
+const ParticipantToggleRow = memo(function ParticipantToggleRow({ participantCount, isOpen, onToggle }: ParticipantToggleRowProps) {
   return (
     <button
       type="button"
       onClick={onToggle}
       aria-expanded={isOpen}
       aria-controls="participants-roster"
-      aria-label={isOpen ? 'Hide participants' : 'Show participants'}
-      className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-full p-1 transition-colors hover:bg-accent/60 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+      className="flex w-full cursor-pointer items-center justify-between rounded-xl border border-border bg-secondary/40 px-3 py-2.5 transition-colors hover:bg-secondary/70 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
     >
-      <span className="flex items-center">
-        {visibleParticipants.map((participant, index) => (
-          <span
-            key={participant.participantId}
-            title={participantNicknames[participant.participantId] ?? displayParticipantId(participant.participantId)}
-            className={cn(
-              'flex size-9 items-center justify-center rounded-full border-2 border-card text-[11px] font-bold',
-              index > 0 && '-ml-2.5',
-              getTone(participant.participantId).avatar,
-            )}
-          >
-            {getParticipantInitials(participant.participantId, participantNicknames)}
-          </span>
-        ))}
-        {overflowCount > 0 ? (
-          <span className="-ml-2.5 flex size-9 items-center justify-center rounded-full border-2 border-card bg-secondary text-[11px] font-semibold text-muted-foreground">
-            +{overflowCount}
-          </span>
-        ) : null}
+      <span className="text-xs font-semibold text-muted-foreground">
+        {participantCount} {participantCount === 1 ? 'participant' : 'participants'}
       </span>
-
-      <span className="flex items-center gap-1.5 pr-2 text-xs font-medium text-muted-foreground">
-        {participantCount} online
-        <ChevronIcon className={cn('transition-transform duration-200', isOpen && 'rotate-180')} />
-      </span>
+      <ChevronIcon className={cn('transition-transform duration-200', isOpen && 'rotate-180')} />
     </button>
   )
 })
@@ -185,10 +163,9 @@ interface ParticipantsRosterProps {
 
 const ParticipantsRoster = memo(function ParticipantsRoster({ participants, participantId, participantNicknames, isLocalUserHost, onKickParticipant, getTone }: ParticipantsRosterProps) {
   return (
-    <ul className="vapor-scroll flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-2xl border border-border bg-background/45 p-3">
-      {participants.map((participant) => {
+    <ul className="vapor-scroll max-h-48 overflow-y-auto rounded-xl border border-border bg-background/45">
+      {participants.map((participant, index) => {
         const isLocalUser = participant.participantId === participantId
-        const roleText = participant.isHost ? 'Host' : null
         const tone = getTone(participant.participantId)
         const rawName = participantNicknames[participant.participantId] ?? displayParticipantId(participant.participantId)
         const displayName = isLocalUser && participant.isHost
@@ -200,23 +177,31 @@ const ParticipantsRoster = memo(function ParticipantsRoster({ participants, part
         return (
           <li
             key={participant.participantId}
-            className="inline-flex max-w-full items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1.5"
+            className={cn(
+              'flex items-center gap-2.5 px-3 py-2.5',
+              index > 0 && 'border-t border-border',
+            )}
           >
-            <span className={cn('rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-wide', tone.chip)} title={participant.participantId}>
+            <span
+              className={cn('flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold', tone.avatar)}
+              title={participant.participantId}
+            >
+              {getParticipantInitials(participant.participantId, participantNicknames)}
+            </span>
+
+            <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
               {displayName}
             </span>
 
-            {roleText ? (
-              <span className="rounded-full bg-foreground/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em] text-background">
-                {roleText}
-              </span>
-            ) : null}
+            {participant.isHost && (
+              <span className="text-warning-foreground shrink-0"><CrownIcon /></span>
+            )}
 
             {isLocalUserHost && !isLocalUser ? (
               <button
                 type="button"
                 onClick={() => onKickParticipant(participant.participantId)}
-                className="rounded-full border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-destructive"
+                className="min-h-8 min-w-[3.25rem] shrink-0 rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-destructive"
                 aria-label={`Remove ${rawName} from room`}
               >
                 Remove
@@ -233,10 +218,11 @@ interface MessageFeedProps {
   chatMessages: ChatMessage[]
   participantNicknames: Record<string, string>
   participantId: string | null
+  hostId: string
   getTone: (participantId: string) => ParticipantTone
 }
 
-const MessageFeed = memo(function MessageFeed({ chatMessages, participantNicknames, participantId, getTone }: MessageFeedProps) {
+const MessageFeed = memo(function MessageFeed({ chatMessages, participantNicknames, participantId, hostId, getTone }: MessageFeedProps) {
   const feedEndRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -276,13 +262,16 @@ const MessageFeed = memo(function MessageFeed({ chatMessages, participantNicknam
               key={message.messageId}
               className={cn('flex min-w-0 max-w-[85%] flex-col gap-1', isOutgoing ? 'ml-auto items-end' : 'mr-auto items-start')}
             >
-              <p className="px-1 text-[11px] text-muted-foreground">
+              <p className="flex items-center gap-1 px-1 text-[11px] text-muted-foreground">
                 {isOutgoing ? (
                   <span className="font-semibold">{outgoingLabel}</span>
                 ) : (
                   <span className={cn('font-semibold', getTone(message.senderParticipantId).name)} title={message.senderParticipantId}>
                     {senderName}
                   </span>
+                )}
+                {message.senderParticipantId === hostId && (
+                  <span className="text-warning-foreground"><CrownIcon /></span>
                 )}
                 <span aria-hidden="true"> · </span>
                 {formatMessageTime(message.sentAtMs)}
@@ -509,7 +498,9 @@ const RoomSecurityIndicator = memo(function RoomSecurityIndicator({ hasPassword 
 
 export const RoomView = memo(function RoomView({
   activeRoomId,
+  activeRoomName,
   participantId,
+  hostId,
   participantCount,
   participants,
   participantNicknames,
@@ -615,7 +606,13 @@ export const RoomView = memo(function RoomView({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Session ID</p>
-            <CardTitle className="font-display mt-1.5 text-xl font-semibold break-all sm:text-2xl">#{activeRoomId}</CardTitle>
+            {activeRoomName ? (
+              <CardTitle className="font-display mt-1.5 text-xl font-semibold break-all sm:text-2xl">
+                {activeRoomName} <span className="text-muted-foreground">· #{activeRoomId}</span>
+              </CardTitle>
+            ) : (
+              <CardTitle className="font-display mt-1.5 text-xl font-semibold break-all sm:text-2xl">#{activeRoomId}</CardTitle>
+            )}
           </div>
 
           <span className="inline-flex items-center gap-1.5 rounded-full bg-status px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-status-foreground">
@@ -628,7 +625,7 @@ export const RoomView = memo(function RoomView({
           <RoomSecurityIndicator hasPassword={hasPassword} />
           <SoloWaitingChip soloHostDeadlineAt={soloHostDeadlineAt} />
           <RoomLifetimeChip expiresAt={expiresAt} />
-          <Button type="button" variant="ghost" size="sm" onClick={() => { void onCopyRoomId() }} aria-label="Copy room ID" className="ml-auto">
+          <Button type="button" variant="ghost" size="sm" onClick={() => { void onCopyRoomId() }} aria-label="Copy room ID" className="ml-auto min-h-11">
             <CopyIcon />
             Copy ID
           </Button>
@@ -640,16 +637,13 @@ export const RoomView = memo(function RoomView({
           {copyFeedback ?? ' '}
         </p>
 
-        <section className="grid gap-3" aria-label="Room participants">
+        <section className="grid gap-2" aria-label="Room participants">
           <h2 className="sr-only">Participants</h2>
 
-          <AvatarStack
-            participants={participants}
-            participantNicknames={participantNicknames}
+          <ParticipantToggleRow
             participantCount={participantCount}
             isOpen={isParticipantListOpen}
             onToggle={() => setIsParticipantListOpen((previous) => !previous)}
-            getTone={getTone}
           />
 
           <div
@@ -672,7 +666,7 @@ export const RoomView = memo(function RoomView({
             {chatStatusText}
           </p>
 
-          <MessageFeed chatMessages={chatMessages} participantNicknames={participantNicknames} participantId={participantId} getTone={getTone} />
+          <MessageFeed chatMessages={chatMessages} participantNicknames={participantNicknames} participantId={participantId} hostId={hostId} getTone={getTone} />
 
           {typingText && (
             <p className="min-h-4 text-xs text-muted-foreground italic" aria-live="polite">

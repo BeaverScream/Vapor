@@ -67,10 +67,12 @@ export function joinRoomRecord(
     lastSeenAt: now
   };
 
-  const peers = Array.from(room.participants.values()).map((peer) => ({
-    participantId: peer.participantId,
-    nickname: peer.nickname ?? null
-  }));
+  const peers = Array.from(room.participants.values())
+    .filter((peer) => !peer.socketId.startsWith("disconnected:"))
+    .map((peer) => ({
+      participantId: peer.participantId,
+      nickname: peer.nickname ?? null,
+    }));
 
   room.participants.set(participantId, participantRecord);
   // nickname mapping is handled by caller
@@ -123,6 +125,7 @@ export function removeParticipantBySocket(
       state.participantToRoom.delete(peer.participantId);
       state.socketToParticipant.delete(peer.socketId);
     }
+    if (room.roomName) state.roomNameToId.delete(room.roomName);
     state.rooms.delete(roomId);
     return {
       roomId,
@@ -135,6 +138,7 @@ export function removeParticipantBySocket(
 
   const participantCount = room.participants.size;
   if (participantCount === 0) {
+    if (room.roomName) state.roomNameToId.delete(room.roomName);
     state.rooms.delete(roomId);
     return {
       roomId,

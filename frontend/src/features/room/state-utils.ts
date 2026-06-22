@@ -13,18 +13,21 @@ import type {
 import { UI_COPY } from './constants'
 import { hasParticipant } from './participant-utils'
 
-export function createInitialRoomSessionState(): RoomSessionState {
+export function createInitialRoomSessionState(screen: RoomSessionState['screen'] = 'lobby'): RoomSessionState {
   return {
     lobbyMode: 'create',
     roomIdInput: '',
+    roomNameInput: '',
     passwordInput: '',
     nicknameInput: '',
-    screen: 'lobby',
+    screen,
     lobbyStatus: 'idle',
     errorMessage: null,
     roomEndedMessage: UI_COPY.ROOM_ENDED,
     participantId: null,
     activeRoomId: null,
+    activeRoomName: null,
+    hostId: null,
     expiresAt: null,
     soloHostDeadlineAt: null,
     participants: [],
@@ -59,6 +62,8 @@ export function withRoomCreated(state: RoomSessionState, payload: RoomCreatedPay
     screen: 'room',
     participantId: payload.participantId,
     activeRoomId: payload.roomId,
+    activeRoomName: payload.roomName ?? null,
+    hostId: payload.hostId,
     expiresAt: payload.expiresAt,
     soloHostDeadlineAt: payload.soloHostDeadlineAt ?? null,
     participants: [{ participantId: payload.participantId, isHost: payload.participantId === payload.hostId }],
@@ -105,6 +110,8 @@ export function withRoomJoined(state: RoomSessionState, payload: RoomJoinedPaylo
     screen: 'room',
     participantId: payload.participantId,
     activeRoomId: payload.roomId,
+    activeRoomName: payload.roomName ?? null,
+    hostId: payload.hostId,
     expiresAt: payload.expiresAt,
     soloHostDeadlineAt: null,
     participants: nextParticipants,
@@ -126,7 +133,7 @@ export function withRoomJoined(state: RoomSessionState, payload: RoomJoinedPaylo
 export function withPeerJoined(state: RoomSessionState, payload: PeerJoinedPayload): RoomSessionState {
   const participants = hasParticipant(state.participants, payload.participantId)
     ? state.participants
-    : [...state.participants, { participantId: payload.participantId, isHost: false }]
+    : [...state.participants, { participantId: payload.participantId, isHost: payload.participantId === state.hostId }]
 
   const participantNicknames = payload.nickname
     ? { ...state.participantNicknames, [payload.participantId]: payload.nickname }
@@ -267,6 +274,8 @@ export function withRoomEnded(state: RoomSessionState, reason?: string): RoomSes
     roomEndedMessage: roomEndedMessageFromReason(reason),
     participantId: null,
     activeRoomId: null,
+    activeRoomName: null,
+    hostId: null,
     expiresAt: null,
     soloHostDeadlineAt: null,
     participants: [],
@@ -276,6 +285,7 @@ export function withRoomEnded(state: RoomSessionState, reason?: string): RoomSes
     chatConnectionState: 'idle',
     connectedPeerCount: 0,
     hostReconnectGraceDeadlineAt: null,
+    roomNameInput: '',
     passwordInput: '',
     nicknameInput: '',
     copyFeedback: null,
@@ -297,6 +307,8 @@ export function resetToLobby(state: RoomSessionState): RoomSessionState {
     roomEndedMessage: UI_COPY.ROOM_ENDED,
     participantId: null,
     activeRoomId: null,
+    activeRoomName: null,
+    hostId: null,
     expiresAt: null,
     soloHostDeadlineAt: null,
     participants: [],
@@ -306,6 +318,7 @@ export function resetToLobby(state: RoomSessionState): RoomSessionState {
     chatConnectionState: 'idle',
     connectedPeerCount: 0,
     hostReconnectGraceDeadlineAt: null,
+    roomNameInput: '',
     passwordInput: '',
     nicknameInput: '',
     copyFeedback: null,
@@ -361,9 +374,17 @@ export function withParticipantKicked(state: RoomSessionState, participantId: st
 
 export function withKickedFromRoom(state: RoomSessionState): RoomSessionState {
   return {
-    ...resetToLobby(state),
-    lobbyStatus: 'error',
-    errorMessage: UI_COPY.KICKED_FROM_ROOM,
+    ...withRoomEnded(state),
+    roomEndedMessage: UI_COPY.KICKED_FROM_ROOM,
+  }
+}
+
+export function withRoomNameInput(state: RoomSessionState, roomNameInput: string): RoomSessionState {
+  return {
+    ...state,
+    roomNameInput,
+    lobbyStatus: state.lobbyStatus === 'error' ? 'idle' : state.lobbyStatus,
+    errorMessage: state.lobbyStatus === 'error' ? null : state.errorMessage,
   }
 }
 

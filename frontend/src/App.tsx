@@ -5,11 +5,14 @@ import { PrivacyPolicyPage } from './features/info/PrivacyPolicyPage'
 import { LobbyView } from './features/room/LobbyView'
 import { RoomEndedView } from './features/room/RoomEndedView'
 import { RoomView } from './features/room/RoomView'
+import { RoomViewDesktop } from './features/room/RoomViewDesktop'
 import { useVaporRoom } from './features/room/useVaporRoom'
 import { AdminDashboard } from './features/admin/AdminDashboard'
 import { cn } from './lib/utils'
 import { useTheme } from './lib/useTheme'
 import { THEME_IDS, THEME_META, type ThemeId } from './lib/theme'
+import { useLayoutMode } from './lib/useLayoutMode'
+import type { LayoutMode } from './lib/layoutMode'
 
 type Page = 'app' | 'privacy' | 'faq' | 'admin'
 
@@ -23,6 +26,7 @@ function pathToPage(pathname: string): Page {
 function App() {
   const { state, actions, derived } = useVaporRoom()
   const { theme, setTheme } = useTheme()
+  const { mode, setMode, isDesktopCapable } = useLayoutMode()
   const [page, setPage] = useState<Page>(() => pathToPage(window.location.pathname))
 
   useEffect(() => {
@@ -51,7 +55,7 @@ function App() {
     return (
       <main className="relative flex min-h-dvh justify-center overflow-hidden px-4">
         <div className="vapor-smoke-layer" aria-hidden="true" />
-        <NavBar onPrivacy={() => navigate('/privacy-policy', 'privacy')} onFaq={() => navigate('/faq', 'faq')} theme={theme} onThemeChange={setTheme} />
+        <NavBar onPrivacy={() => navigate('/privacy-policy', 'privacy')} onFaq={() => navigate('/faq', 'faq')} theme={theme} onThemeChange={setTheme} layoutMode={mode} onLayoutModeChange={setMode} isDesktopCapable={isDesktopCapable} />
         <PrivacyPolicyPage onBack={() => navigate('/', 'app')} />
       </main>
     )
@@ -61,23 +65,64 @@ function App() {
     return (
       <main className="relative flex min-h-dvh justify-center overflow-hidden px-4">
         <div className="vapor-smoke-layer" aria-hidden="true" />
-        <NavBar onPrivacy={() => navigate('/privacy-policy', 'privacy')} onFaq={() => navigate('/faq', 'faq')} theme={theme} onThemeChange={setTheme} />
+        <NavBar onPrivacy={() => navigate('/privacy-policy', 'privacy')} onFaq={() => navigate('/faq', 'faq')} theme={theme} onThemeChange={setTheme} layoutMode={mode} onLayoutModeChange={setMode} isDesktopCapable={isDesktopCapable} />
         <FAQPage onBack={() => navigate('/', 'app')} />
       </main>
     )
   }
 
+  const roomProps = state.screen === 'room' && state.activeRoomId
+    ? {
+        activeRoomId: state.activeRoomId,
+        activeRoomName: state.activeRoomName,
+        participantId: state.participantId,
+        hostId: state.hostId ?? '',
+        participantCount: state.participantCount,
+        participants: state.participants,
+        participantNicknames: state.participantNicknames,
+        roomStatus: derived.roomStatus,
+        chatStatusText: derived.chatStatusText,
+        soloHostDeadlineAt: derived.soloHostDeadlineAt,
+        expiresAt: derived.expiresAt,
+        hasPassword: state.hasPassword,
+        copyFeedback: state.copyFeedback,
+        chatMessages: state.chatMessages,
+        chatDraft: state.chatDraft,
+        typingPeerIds: state.typingPeerIds,
+        onCopyRoomId: actions.copyRoomId,
+        onSendChatMessage: actions.sendChatMessage,
+        onNotifyTypingStart: actions.notifyTypingStart,
+        onLeaveRoom: actions.leaveRoom,
+        onKickParticipant: actions.kickParticipant,
+      }
+    : null
+
   return (
-    <main className="relative flex min-h-dvh items-center justify-center overflow-hidden px-4 py-6">
+    <main className={cn(
+      'relative overflow-hidden',
+      state.screen === 'room' && mode === 'desktop'
+        ? 'flex flex-col min-h-dvh px-6 py-4'
+        : state.screen === 'room'
+        ? 'flex min-h-dvh items-start justify-center px-4 pt-16 pb-4'
+        : 'flex min-h-dvh items-center justify-center px-4 py-6',
+    )}>
       <h1 className="sr-only">Vapor: Secure Temporary Rooms for Real-Time Collaboration</h1>
       <p className="sr-only">Connection secure visual atmosphere active.</p>
       <div className="vapor-smoke-layer" aria-hidden="true" />
-      <NavBar onPrivacy={() => navigate('/privacy-policy', 'privacy')} onFaq={() => navigate('/faq', 'faq')} theme={theme} onThemeChange={setTheme} />
+      <NavBar onPrivacy={() => navigate('/privacy-policy', 'privacy')} onFaq={() => navigate('/faq', 'faq')} theme={theme} onThemeChange={setTheme} layoutMode={mode} onLayoutModeChange={setMode} isDesktopCapable={isDesktopCapable} />
+
+      {state.screen === 'reconnecting' && (
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="size-5 animate-spin rounded-full border-2 border-border border-t-foreground" />
+          <p className="text-sm text-muted-foreground">Reconnecting…</p>
+        </div>
+      )}
 
       {state.screen === 'lobby' && (
         <LobbyView
           lobbyMode={derived.lobbyMode}
           roomIdInput={state.roomIdInput}
+          roomNameInput={state.roomNameInput}
           passwordInput={state.passwordInput}
           nicknameInput={state.nicknameInput}
           isSubmitting={state.lobbyStatus === 'submitting'}
@@ -87,35 +132,18 @@ function App() {
           primaryActionLabel={derived.primaryActionLabel}
           onLobbyModeChange={actions.setLobbyMode}
           onRoomIdChange={actions.setRoomIdInput}
+          onRoomNameChange={actions.setRoomNameInput}
           onPasswordChange={actions.setPasswordInput}
           onNicknameChange={actions.setNicknameInput}
           onSubmit={actions.submitLobby}
         />
       )}
 
-      {state.screen === 'room' && state.activeRoomId ? (
-        <RoomView
-          activeRoomId={state.activeRoomId}
-          participantId={state.participantId}
-          participantCount={state.participantCount}
-          participants={state.participants}
-          participantNicknames={state.participantNicknames}
-          roomStatus={derived.roomStatus}
-          chatStatusText={derived.chatStatusText}
-          soloHostDeadlineAt={derived.soloHostDeadlineAt}
-          expiresAt={derived.expiresAt}
-          hasPassword={state.hasPassword}
-          copyFeedback={state.copyFeedback}
-          chatMessages={state.chatMessages}
-          chatDraft={state.chatDraft}
-          typingPeerIds={state.typingPeerIds}
-          onCopyRoomId={actions.copyRoomId}
-          onSendChatMessage={actions.sendChatMessage}
-          onNotifyTypingStart={actions.notifyTypingStart}
-          onLeaveRoom={actions.leaveRoom}
-          onKickParticipant={actions.kickParticipant}
-        />
-      ) : null}
+      {roomProps && (
+        mode === 'desktop'
+          ? <RoomViewDesktop {...roomProps} />
+          : <RoomView {...roomProps} />
+      )}
 
       {state.screen === 'room-ended' ? (
         <RoomEndedView message={state.roomEndedMessage} onBackToLobby={actions.backToLobby} />
@@ -136,9 +164,12 @@ interface NavBarProps {
   onFaq: () => void
   theme: ThemeId
   onThemeChange: (theme: ThemeId) => void
+  layoutMode: LayoutMode
+  onLayoutModeChange: (m: LayoutMode) => void
+  isDesktopCapable: boolean
 }
 
-function NavBar({ onPrivacy, onFaq, theme, onThemeChange }: NavBarProps) {
+function NavBar({ onPrivacy, onFaq, theme, onThemeChange, layoutMode, onLayoutModeChange, isDesktopCapable }: NavBarProps) {
   return (
     <header className="fixed inset-x-0 top-0 z-20 border-b border-border bg-card/80 backdrop-blur-md">
       <nav aria-label="Primary" className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-2.5">
@@ -159,10 +190,40 @@ function NavBar({ onPrivacy, onFaq, theme, onThemeChange }: NavBarProps) {
           >
             FAQ
           </button>
+          {isDesktopCapable && (
+            <LayoutToggle mode={layoutMode} onModeChange={onLayoutModeChange} />
+          )}
           <ThemeSwitcher theme={theme} onThemeChange={onThemeChange} />
         </span>
       </nav>
     </header>
+  )
+}
+
+function LayoutToggle({ mode, onModeChange }: { mode: LayoutMode; onModeChange: (m: LayoutMode) => void }) {
+  return (
+    <div role="group" aria-label="Layout" className="flex items-center gap-1 rounded-full border border-border bg-secondary/60 p-1">
+      {(['mobile', 'desktop'] as const).map((m) => {
+        const isActive = mode === m
+        return (
+          <button
+            key={m}
+            type="button"
+            onClick={() => onModeChange(m)}
+            aria-pressed={isActive}
+            aria-label={`${m === 'mobile' ? 'Mobile' : 'Desktop'} layout`}
+            className={cn(
+              'cursor-pointer rounded-full px-2.5 py-0.5 text-[11px] font-medium capitalize transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              isActive
+                ? 'bg-foreground text-background'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {m === 'mobile' ? 'Mobile' : 'Desktop'}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

@@ -10,6 +10,10 @@ import { WEBRTC_ICE_SERVERS } from './constants'
 
 const DATA_CHANNEL_LABEL = 'vapor-chat'
 
+// Only JSON frames whose `type` is in this set are surfaced as chat.
+// Non-JSON plaintext is always treated as chat. All other JSON frames are dropped.
+const CHAT_MESSAGE_TYPES = new Set<string>(['text'])
+
 type SignalingEmitter = {
   emitSignalOffer: (payload: SignalOfferRequest) => void
   emitSignalAnswer: (payload: SignalAnswerRequest) => void
@@ -29,6 +33,7 @@ type VaporWebRtcChatMeshArgs = {
   onRemoteTypingStatus: (fromParticipantId: string, isTyping: boolean) => void
   onConnectedPeerCountChange: (count: number) => void
   onTelemetryEvent?: (event: WebRtcTelemetryEvent) => void
+  onNewMessage?: () => void
 }
 
 export class VaporWebRtcChatMesh {
@@ -39,6 +44,7 @@ export class VaporWebRtcChatMesh {
   private readonly onRemoteTypingStatus: (fromParticipantId: string, isTyping: boolean) => void
   private readonly onConnectedPeerCountChange: (count: number) => void
   private readonly onTelemetryEvent: NonNullable<VaporWebRtcChatMeshArgs['onTelemetryEvent']>
+  private readonly onNewMessage: (() => void) | undefined
   private readonly peerConnections = new Map<string, RTCPeerConnection>()
   private readonly dataChannels = new Map<string, RTCDataChannel>()
   private disposed = false
@@ -52,6 +58,7 @@ export class VaporWebRtcChatMesh {
     onRemoteTypingStatus,
     onConnectedPeerCountChange,
     onTelemetryEvent,
+    onNewMessage,
   }: VaporWebRtcChatMeshArgs) {
     this.roomId = roomId
     this.participantId = participantId
@@ -60,6 +67,7 @@ export class VaporWebRtcChatMesh {
     this.onRemoteTypingStatus = onRemoteTypingStatus
     this.onConnectedPeerCountChange = onConnectedPeerCountChange
     this.onTelemetryEvent = onTelemetryEvent ?? (() => undefined)
+    this.onNewMessage = onNewMessage
   }
 
   syncPeers(peerIds: string[]): void {
@@ -267,8 +275,10 @@ export class VaporWebRtcChatMesh {
 
     channel.onmessage = (event) => {
       const raw = this.asTextMessage(event.data)
+      let isChat = true
       try {
         const parsed = JSON.parse(raw) as unknown
+        isChat = false
         if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
           const { type } = parsed as Record<string, unknown>
           if (type === 'typing_start') {
@@ -279,11 +289,17 @@ export class VaporWebRtcChatMesh {
             this.onRemoteTypingStatus(peerId, false)
             return
           }
+          if (typeof type === 'string' && CHAT_MESSAGE_TYPES.has(type)) {
+            isChat = true
+          }
         }
       } catch {
-        // not JSON — treat as chat message
+        // not JSON — always chat
       }
-      this.onRemoteMessage(peerId, raw)
+      if (isChat) {
+        this.onRemoteMessage(peerId, raw)
+        this.onNewMessage?.()
+      }
     }
 
     channel.onopen = () => {

@@ -419,14 +419,16 @@ main:has(input:focus, textarea:focus) .vapor-smoke-layer::after {
   background-clip: padding-box;
 }
 
-/* Shared mobile "phone frame" footprint for the lobby and room panels (D-7).
-   Holds a 19.5:9 (height:width) portrait aspect on viewports tall enough to
-   honour it; on shorter screens max-height clamps the panel and the ratio
-   relaxes (width stays usable, panel is as tall as fits). */
+/* Shared mobile "phone frame" footprint for the lobby and room panels (D-7, D-1).
+   Fills available viewport height (`dvh` accommodates Android/iOS chrome) minus
+   the 6 rem NavBar. `max-height` caps the panel so it never overflows the
+   viewport; `max-width` keeps it in a narrow card column. Width follows from
+   `min(100%, 26rem)` — no fixed aspect ratio that would clip on non-standard
+   proportions. */
 .vapor-app-frame {
   width: 100%;
   max-width: 26rem;
-  aspect-ratio: 9 / 19.5;
+  height: calc(100dvh - 6rem);
   max-height: calc(100dvh - 6rem);
 }
 

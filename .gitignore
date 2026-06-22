@@ -36,6 +36,9 @@ docker-compose.override.yml
 # Analytics data
 backend/data/
 
+# MCP config (may contain API keys)
+.mcp.json
+
 # Others
 .github/
 docs
@@ -45,3 +48,4 @@ Reference/
 CLAUDE.md
 GEMINI.md
 .claudeignore
+.claude/

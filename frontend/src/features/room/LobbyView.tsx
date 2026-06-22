@@ -10,6 +10,7 @@ import type { LobbyMode } from './types'
 interface LobbyViewProps {
   lobbyMode: LobbyMode
   roomIdInput: string
+  roomNameInput: string
   passwordInput: string
   nicknameInput: string
   isSubmitting: boolean
@@ -19,6 +20,7 @@ interface LobbyViewProps {
   primaryActionLabel: string
   onLobbyModeChange: (mode: LobbyMode) => void
   onRoomIdChange: (value: string) => void
+  onRoomNameChange: (value: string) => void
   onPasswordChange: (value: string) => void
   onNicknameChange: (value: string) => void
   onSubmit: () => void
@@ -42,6 +44,13 @@ const PersonIcon = () => (
   </svg>
 )
 
+const TagIcon = () => (
+  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" width="16" height="16" aria-hidden="true">
+    <path d="M2 2h5.5l6.5 6.5-5.5 5.5L2 7.5V2Z" />
+    <circle cx="5" cy="5" r="1" fill="currentColor" stroke="none" />
+  </svg>
+)
+
 const PlusIcon = () => (
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" width="16" height="16" aria-hidden="true">
     <path d="M8 3v10M3 8h10" />
@@ -57,6 +66,7 @@ const EnterIcon = () => (
 export const LobbyView = memo(function LobbyView({
   lobbyMode,
   roomIdInput,
+  roomNameInput,
   passwordInput,
   nicknameInput,
   isSubmitting,
@@ -66,6 +76,7 @@ export const LobbyView = memo(function LobbyView({
   primaryActionLabel,
   onLobbyModeChange,
   onRoomIdChange,
+  onRoomNameChange,
   onPasswordChange,
   onNicknameChange,
   onSubmit,
@@ -94,7 +105,7 @@ export const LobbyView = memo(function LobbyView({
                   type="button"
                   onClick={() => onLobbyModeChange('create')}
                   className={cn(
-                    'rounded-full px-3 py-2.5 text-sm font-medium transition-colors',
+                    'min-h-11 rounded-full px-3 py-2.5 text-sm font-medium transition-colors',
                     lobbyMode === 'create'
                       ? 'bg-foreground text-background shadow-sm'
                       : 'text-muted-foreground hover:text-foreground',
@@ -107,7 +118,7 @@ export const LobbyView = memo(function LobbyView({
                   type="button"
                   onClick={() => onLobbyModeChange('join')}
                   className={cn(
-                    'rounded-full px-3 py-2.5 text-sm font-medium transition-colors',
+                    'min-h-11 rounded-full px-3 py-2.5 text-sm font-medium transition-colors',
                     lobbyMode === 'join'
                       ? 'bg-foreground text-background shadow-sm'
                       : 'text-muted-foreground hover:text-foreground',
@@ -121,7 +132,7 @@ export const LobbyView = memo(function LobbyView({
 
             {lobbyMode === 'join' ? (
               <div className="grid gap-2">
-                <Label htmlFor="room-id-input">Room ID</Label>
+                <Label htmlFor="room-id-input">Room ID or name</Label>
                 <Input
                   id="room-id-input"
                   value={roomIdInput}
@@ -130,11 +141,27 @@ export const LobbyView = memo(function LobbyView({
                   autoCorrect="off"
                   autoComplete="off"
                   spellCheck={false}
-                  placeholder="Paste exact room ID"
+                  placeholder="Room ID or readable name"
                   adornment={<HashIcon />}
                 />
               </div>
-            ) : null}
+            ) : (
+              <div className="grid gap-2">
+                <Label htmlFor="room-name-input">Room name <span className="text-muted-foreground">(optional)</span></Label>
+                <Input
+                  id="room-name-input"
+                  value={roomNameInput}
+                  onChange={(event) => onRoomNameChange(event.target.value)}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="3–24 chars, letters, numbers, hyphens"
+                  maxLength={24}
+                  adornment={<TagIcon />}
+                />
+              </div>
+            )}
 
             <div className="grid gap-2">
               <Label htmlFor="password-input">

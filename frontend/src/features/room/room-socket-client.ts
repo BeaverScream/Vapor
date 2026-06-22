@@ -75,5 +75,6 @@ export function createRoomSocketClient(signalingUrl: string = SIGNALING_URL): Ro
     emitSignalAnswer: (payload: SignalAnswerRequest) => socket.emit(CLIENT_EVENTS.SIGNAL_ANSWER, payload),
     emitSignalIce: (payload: SignalIceRequest) => socket.emit(CLIENT_EVENTS.SIGNAL_ICE, payload),
     disconnect: () => socket.disconnect(),
+    connect: () => socket.connect(),
   }
 }

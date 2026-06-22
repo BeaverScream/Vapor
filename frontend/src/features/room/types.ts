@@ -2,7 +2,6 @@ import {
   CLIENT_EVENT_NAMES,
   SERVER_EVENT_NAMES,
   type SIGNALING_ERROR_CODES,
-  type CreateRoomPayload,
   type HostReconnectGracePayload as SharedHostReconnectGracePayload,
   type JoinRoomPayload,
   type KickParticipantPayload as SharedKickParticipantPayload,
@@ -67,7 +66,7 @@ export type LobbyStatus = 'idle' | 'submitting' | 'error'
 
 export type LobbyMode = 'create' | 'join'
 
-export type Screen = 'lobby' | 'room' | 'room-ended'
+export type Screen = 'lobby' | 'reconnecting' | 'room' | 'room-ended'
 
 export type SocketState = 'connecting' | 'connected' | 'disconnected'
 
@@ -116,7 +115,11 @@ export type ResumeSessionPayload = SharedResumeSessionPayload
 
 export type ResumeSessionRequest = Required<ResumeSessionPayload>
 
-export type CreateRoomRequest = Required<CreateRoomPayload>
+export type CreateRoomRequest = {
+  password: string
+  nickname: string
+  roomName?: string
+}
 
 export type JoinRoomRequest = Required<JoinRoomPayload>
 
@@ -141,6 +144,7 @@ export type RoomDestroyedPayload = SharedRoomDestroyedPayload
 export interface RoomSessionState {
   lobbyMode: LobbyMode
   roomIdInput: string
+  roomNameInput: string
   passwordInput: string
   nicknameInput: string
   screen: Screen
@@ -149,6 +153,8 @@ export interface RoomSessionState {
   roomEndedMessage: string
   participantId: string | null
   activeRoomId: string | null
+  activeRoomName: string | null
+  hostId: string | null
   expiresAt: number | null
   soloHostDeadlineAt: number | null
   participants: Participant[]
@@ -170,6 +176,7 @@ export interface RoomSessionState {
 export interface RoomSessionActions {
   setLobbyMode: (mode: LobbyMode) => void
   setRoomIdInput: (value: string) => void
+  setRoomNameInput: (value: string) => void
   setPasswordInput: (value: string) => void
   setNicknameInput: (value: string) => void
   submitLobby: () => void
@@ -221,4 +228,5 @@ export interface RoomSocketClient {
   emitSignalAnswer: (payload: SignalAnswerRequest) => void
   emitSignalIce: (payload: SignalIceRequest) => void
   disconnect: () => void
+  connect: () => void
 }
