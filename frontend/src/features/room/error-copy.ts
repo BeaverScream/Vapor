@@ -17,6 +17,9 @@ export function mapErrorCode(rawCode?: string): ErrorCode {
     case SIGNALING_ERROR_CODES.INVALID_PASSWORD:
     case SIGNALING_ERROR_CODES.INVALID_SIGNAL_PAYLOAD:
     case SIGNALING_ERROR_CODES.RATE_LIMITED:
+    case SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED:
+    case SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE:
+    case SIGNALING_ERROR_CODES.NOT_AUTHORIZED:
       return rawCode
     case SIGNALING_ERROR_CODES.PASSWORD_VERSION_MISMATCH:
       return SIGNALING_ERROR_CODES.INVALID_PASSWORD
@@ -39,6 +42,12 @@ export function getErrorMessage(code: ErrorCode): string {
       return 'Nickname is taken or invalid in this room.'
     case SIGNALING_ERROR_CODES.RATE_LIMITED:
       return 'Too many attempts. Try again later.'
+    case SIGNALING_ERROR_CODES.NOT_AUTHORIZED:
+      return 'You are not authorized to perform this action.'
+    case SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE:
+      return 'Your reconnect token has expired. Please rejoin the room.'
+    case SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED:
+      return 'The host reconnect window has closed. The room may have ended.'
     default:
       return 'Could not connect. Try again.'
   }

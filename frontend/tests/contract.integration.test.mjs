@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const registerSocketHandlersFile = path.resolve(process.cwd(), '../backend/src/signaling/registerSocketHandlers.ts')
+const rateLimitingFile = path.resolve(process.cwd(), '../backend/src/signaling/handlers/rateLimiting.ts')
 const backendStateFile = path.resolve(process.cwd(), '../backend/src/signaling/state.ts')
 const appFile = path.resolve(process.cwd(), 'src/App.tsx')
 const indexCssFile = path.resolve(process.cwd(), 'src/index.css')
@@ -71,7 +72,7 @@ test('T0.0-02: required payload keys for room transitions remain present in FE c
   expectContains(sharedPayloads, 'export type RoomCreatedPayload = {', 'shared RoomCreatedPayload type')
   expectContains(sharedPayloads, 'hostId: string', 'shared hostId field on room lifecycle payloads')
   expectContains(sharedPayloads, 'expiresAt: number', 'shared expiresAt number field')
-  expectContains(sharedPayloads, 'soloHostDeadlineAt?: number | null;', 'shared optional solo host deadline field')
+  expectContains(sharedPayloads, 'soloDeadlineAt?: number | null;', 'shared optional solo deadline field')
   expectContains(sharedPayloads, 'participantCount: number', 'shared participantCount field')
   expectContains(sharedPayloads, 'export type SignalOfferRelayPayload = {', 'shared SignalOfferRelayPayload type')
   expectContains(sharedPayloads, 'export type SignalAnswerRelayPayload = {', 'shared SignalAnswerRelayPayload type')
@@ -101,7 +102,7 @@ test('T2.6-03: frontend WebRTC signaling and RAM-only chat state wiring remain l
   expectContains(useRoom, 'new VaporWebRtcChatMesh', 'WebRTC mesh construction')
   expectContains(useRoom, 'peerMesh.syncPeers(payload.peers.map((peer) => peer.participantId))', 'peer sync on room_joined')
   expectContains(useRoom, 'emitSafeWebRtcTelemetry', 'safe telemetry helper wiring')
-  expectContains(useRoom, 'socket.onSignalOffer(onSignalOffer)', 'signal_offer hook subscription')
+  expectContains(useRoom, 'void peerMeshRef.current?.handleSignalOffer(payload)', 'signal_offer hook subscription')
   expectContains(useRoom, 'sendChatMessage', 'chat send action wiring')
   expectContains(useRoom, 'sessionStorage', 'session storage usage for reconnect token policy')
 
@@ -122,9 +123,9 @@ test('T2.5-01: frontend solo-host timer state and countdown UX are contract-lock
   const useRoom = await readFile(useRoomFile, 'utf8')
   const roomView = await readFile(roomViewFile, 'utf8')
 
-  expectContains(types, 'soloHostDeadlineAt: number | null', 'room session solo host deadline state field')
-  expectContains(stateUtils, 'soloHostDeadlineAt: payload.soloHostDeadlineAt ?? null', 'room-created reducer solo deadline sync')
-  expectContains(stateUtils, 'soloHostDeadlineAt: null', 'solo deadline cleared on lifecycle transitions')
+  expectContains(types, 'soloDeadlineAt: number | null', 'room session solo deadline state field')
+  expectContains(stateUtils, 'soloDeadlineAt: payload.soloDeadlineAt ?? null', 'room-created reducer solo deadline sync')
+  expectContains(stateUtils, 'soloDeadlineAt: null', 'solo deadline cleared on lifecycle transitions')
   expectContains(useRoom, 'function getSoloWaitingText', 'solo waiting formatter helper')
   expectContains(useRoom, 'SOLO_HOST_WARNING', 'solo warning copy usage')
   expectContains(roomView, 'soloWaitingChipText', 'solo warning chip prop wiring')
@@ -139,7 +140,7 @@ test('T2.2-01: frontend resume-session flow includes race guard and deterministi
   expectContains(types, 'ResumeSessionRequest', 'resume request contract type')
   expectContains(useRoom, 'resumeInFlightRef', 'resume race guard ref')
   expectContains(useRoom, 'autoResumeRequestedRef', 'auto resume state guard ref')
-  expectContains(useRoom, 'socket.emitResumeSession(storedSession)', 'resume_session emit path')
+  expectContains(useRoom, 'socketRef.current?.emitResumeSession(storedSession)', 'resume_session emit path')
   expectContains(useRoom, 'clearStoredReconnectSession()', 'token cleanup path')
   expectContains(constants, 'RECONNECT_SESSION_STORAGE_KEY', 'sessionStorage key constant')
 })
@@ -160,7 +161,7 @@ test('T2.7-01: frontend ICE config and telemetry safety wiring remain locked', a
 
 test('T0.1-07: FE join emit preserves exact roomId input text', async () => {
   const content = await readFile(useRoomFile, 'utf8')
-  expectContains(content, 'socket.emitJoinRoom({ roomId: state.roomIdInput, password: state.passwordInput, nickname: trimmedNickname })', 'exact roomId join emission')
+  expectContains(content, 'socket.emitJoinRoom({ roomId: s.roomIdInput, password: s.passwordInput, nickname: trimmedNickname })', 'exact roomId join emission')
 })
 
 // ---- UI Shell ----
@@ -192,7 +193,7 @@ test('T1.4-02: auth mismatch normalization and required-password submit hook rem
 
   expectContains(errorCopy, 'case SIGNALING_ERROR_CODES.PASSWORD_VERSION_MISMATCH:', 'PASSWORD_VERSION_MISMATCH mapping case')
   expectContains(errorCopy, 'return SIGNALING_ERROR_CODES.INVALID_PASSWORD', 'PASSWORD_VERSION_MISMATCH normalization target')
-  expectContains(useRoom, 'if (state.passwordInput.trim().length === 0)', 'required-password submit guard')
+  expectContains(useRoom, 'if (s.passwordInput.trim().length === 0)', 'required-password submit guard')
   expectContains(useRoom, 'getErrorMessage(SIGNALING_ERROR_CODES.INVALID_PASSWORD)', 'required-password deterministic error mapping')
   expectContains(lobbyView, 'placeholder="Required"', 'required-password lobby affordance')
   expectContains(sharedErrors, 'PASSWORD_VERSION_MISMATCH: "PASSWORD_VERSION_MISMATCH"', 'shared PASSWORD_VERSION_MISMATCH constant')
@@ -230,7 +231,7 @@ test('T1.7-01: room lifetime text keeps >=10m compact and <10m strict zero-padde
   expectContains(useRoom, "return `Ends in ${minutes}m`", '>=10 minutes text format')
   expectContains(useRoom, "minutes.toString().padStart(2, '0')", 'zero-padded minute formatting')
   expectContains(useRoom, "seconds.toString().padStart(2, '0')", 'zero-padded second formatting')
-  expectContains(useRoom, "return `Ends in ${paddedMinutes}:${paddedSeconds}`", 'strict mm:ss display under 10 minutes')
+  expectContains(useRoom, "return `Ends in ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`", 'strict mm:ss display under 10 minutes')
 })
 
 // ---- Lifecycle ----
@@ -272,7 +273,7 @@ test('T3.2-05 (P3-NK-005): reconnect flow restores participant identity and nick
 
   // room_joined is the single handler for both initial join and resume;
   // it always refreshes the reconnect token so the identity chain stays valid
-  expectContains(useRoom, 'writeStoredReconnectSession({ roomId: payload.roomId, reconnectToken: payload.reconnectToken })', 'reconnect token refreshed on every room_joined including resume')
+  expectContains(useRoom, 'persistence.writeStoredReconnectSession({', 'reconnect token refreshed on every room_joined including resume')
 
   // Both resume guards must be cleared on a successful room_joined so a subsequent
   // disconnect can trigger a clean new reconnect cycle
@@ -294,6 +295,7 @@ test('T3.2-05 (P3-NK-005): reconnect flow restores participant identity and nick
 test('T3.3-04 (P3-AB-004): lifecycle edge case contract coverage — TTL expiry, solo-timeout, and quota removal are verifiable', async () => {
   const handlers = await readFile(registerSocketHandlersFile, 'utf8')
   const stateSource = await readFile(backendStateFile, 'utf8')
+  const rateLimiting = await readFile(rateLimitingFile, 'utf8')
   const sharedReasons = await readFile(sharedReasonsFile, 'utf8')
   const sharedPolicy = await readFile(sharedPolicyFile, 'utf8')
 
@@ -309,8 +311,8 @@ test('T3.3-04 (P3-AB-004): lifecycle edge case contract coverage — TTL expiry,
   expectContains(sharedReasons, 'SOLO_TIMEOUT_EXPIRED: "solo_timeout_expired"', 'solo_timeout_expired reason declared in shared reasons')
   expectContains(sharedPolicy, 'SOLO_HOST_ROOM_TIMEOUT_MS', 'Solo-host timeout constant present in shared policy')
 
-  // Solo-timeout state: soloHostDeadlineAt is included in room_created payload so clients can show countdown
-  expectContains(handlers, 'soloHostDeadlineAt: policy.soloHostDeadlineAt', 'soloHostDeadlineAt included in room_created payload')
+  // Solo-timeout state: soloDeadlineAt is included in room_created payload so clients can show countdown
+  expectContains(handlers, 'soloDeadlineAt: policy.soloDeadlineAt', 'soloDeadlineAt included in room_created payload')
 
   // Quota removal: no per-subject active-room quota mechanism exists in state or handler (BL-QUOTA-01/02/03)
   assert.equal(
@@ -325,9 +327,11 @@ test('T3.3-04 (P3-AB-004): lifecycle edge case contract coverage — TTL expiry,
   )
 
   // Burst rate limiting: abuse control uses a temporary in-memory blocklist, not per-room quotas (BL-QUOTA-03)
-  expectContains(handlers, 'temporaryBlocklistBySubject', 'Abuse control uses temporary in-memory blocklist, not quotas')
-  expectContains(handlers, 'createAttemptsBySubject', 'Create-room burst window is tracked per-subject in RAM only')
-  expectContains(handlers, 'CREATE_ROOM_BURST_THRESHOLD', 'Burst threshold constant gates the blocklist trigger')
+  // The implementation lives in rateLimiting.ts; handler delegates via rateLimiting.checkAndRecordCreateAttempt
+  expectContains(handlers, 'rateLimiting.checkAndRecordCreateAttempt', 'Abuse control wired through rateLimiting module in handler')
+  expectContains(rateLimiting, 'temporaryBlocklistBySubject', 'Abuse control uses temporary in-memory blocklist, not quotas')
+  expectContains(rateLimiting, 'createAttemptsBySubject', 'Create-room burst window is tracked per-subject in RAM only')
+  expectContains(rateLimiting, 'CREATE_ROOM_BURST_THRESHOLD', 'Burst threshold constant gates the blocklist trigger')
 })
 
 // ---- VP-4.1 Identity & UX Refinement ----
@@ -396,7 +400,7 @@ test('T4.2-02: DiagnosticsOverlay is wired to vapor:socket-latency and vapor:web
   expectContains(roomView, "detail.kind === 'bitrate_stats'", 'DiagnosticsOverlay handles bitrate_stats telemetry kind')
 
   // Socket client dispatches the latency event on the socket.io pong measurement
-  expectContains(socketClient, "socket.io.on('pong'", 'socket client measures latency via socket.io pong callback')
+  expectContains(socketClient, "(socket.io.on as (event: string, listener: (latencyMs: number) => void) => void)('pong'", 'socket client measures latency via socket.io pong callback')
   expectContains(socketClient, "window.dispatchEvent(new CustomEvent('vapor:socket-latency', { detail: { latencyMs } }))", 'socket client dispatches vapor:socket-latency on pong with latencyMs payload')
 
   // useVaporRoom routes WebRTC telemetry through the safe window event dispatcher

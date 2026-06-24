@@ -73,7 +73,7 @@ export type RoomCreatedPayload = {
   reconnectToken: string | null;
   participantNickname?: string | null;
   expiresAt: number;
-  soloHostDeadlineAt?: number | null;
+  soloDeadlineAt?: number | null;
   participantCount: number;
   hasPassword?: boolean;
   roomName?: string;
@@ -86,6 +86,7 @@ export type RoomJoinedPayload = {
   peers: Array<{ participantId: string; nickname?: string | null }>;
   reconnectToken: string | null;
   expiresAt: number;
+  soloDeadlineAt?: number | null;
   participantNickname?: string | null;
   participantCount: number;
   hasPassword?: boolean;
@@ -112,7 +113,7 @@ export type PeerLeftPayload = {
   participantId: string;
   reason: "disconnect" | "leave";
   participantCount: number;
-  soloHostDeadlineAt?: number | null;
+  soloDeadlineAt?: number | null;
 };
 
 export type HostReconnectGracePayload = {

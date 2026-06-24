@@ -2,8 +2,8 @@ export type RoomPolicyRecord = {
   expiresAt: number;
   hasEverHadGuest: boolean;
   roomTtlTimeoutRef?: NodeJS.Timeout;
-  soloHostDeadlineAt?: number;
-  soloHostTimeoutRef?: NodeJS.Timeout;
+  soloDeadlineAt?: number;
+  soloTimeoutRef?: NodeJS.Timeout;
   hostGraceDeadlineAt?: number;
   hostGraceTimeoutRef?: NodeJS.Timeout;
 };
@@ -29,7 +29,7 @@ export function createGraceWindowContext(): GraceWindowContext {
 
 export function clearRoomPolicyTimers(policy: RoomPolicyRecord): void {
   if (policy.roomTtlTimeoutRef) clearTimeout(policy.roomTtlTimeoutRef);
-  if (policy.soloHostTimeoutRef) clearTimeout(policy.soloHostTimeoutRef);
+  if (policy.soloTimeoutRef) clearTimeout(policy.soloTimeoutRef);
   if (policy.hostGraceTimeoutRef) clearTimeout(policy.hostGraceTimeoutRef);
 }
 
@@ -57,14 +57,14 @@ export function createRoomPolicy(
   const policy: RoomPolicyRecord = {
     expiresAt: createdAt + maxDurationMs,
     hasEverHadGuest: false,
-    soloHostDeadlineAt: createdAt + soloTimeoutMs,
+    soloDeadlineAt: createdAt + soloTimeoutMs,
   };
 
   policy.roomTtlTimeoutRef = setTimeout(onTtlExpired, maxDurationMs);
   policy.roomTtlTimeoutRef.unref?.();
 
-  policy.soloHostTimeoutRef = setTimeout(onSoloExpired, soloTimeoutMs);
-  policy.soloHostTimeoutRef.unref?.();
+  policy.soloTimeoutRef = setTimeout(onSoloExpired, soloTimeoutMs);
+  policy.soloTimeoutRef.unref?.();
 
   ctx.roomPolicyById.set(roomId, policy);
 
@@ -89,6 +89,20 @@ export function beginHostGrace(
   policy.hostGraceTimeoutRef.unref?.();
 
   return deadlineAt;
+}
+
+export function restartSoloTimer(
+  policy: RoomPolicyRecord,
+  soloTimeoutMs: number,
+  nowFn: () => number,
+  onExpired: () => void,
+): number {
+  if (policy.soloTimeoutRef) clearTimeout(policy.soloTimeoutRef);
+  const deadline = nowFn() + soloTimeoutMs;
+  policy.soloDeadlineAt = deadline;
+  policy.soloTimeoutRef = setTimeout(onExpired, soloTimeoutMs);
+  policy.soloTimeoutRef.unref?.();
+  return deadline;
 }
 
 export function beginGuestGrace(

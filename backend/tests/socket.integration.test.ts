@@ -1554,12 +1554,12 @@ test("T3.1-07 (P3-SH-007): solo-host timer handle is cleared when first guest jo
     const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as {
       roomId: string;
       participantId: string;
-      soloHostDeadlineAt: number | null;
+      soloDeadlineAt: number | null;
     };
     assert.ok(roomCreated, "room_created must be emitted");
     assert.ok(
-      typeof roomCreated.soloHostDeadlineAt === "number",
-      "room_created must include a numeric soloHostDeadlineAt for a solo-host room"
+      typeof roomCreated.soloDeadlineAt === "number",
+      "room_created must include a numeric soloDeadlineAt for a solo-host room"
     );
 
     // Capture the solo-host timer handle before any guest joins
@@ -1996,12 +1996,12 @@ test("P3-LC-001 (BL-SESSION-04): solo-host room is destroyed with solo_timeout_e
     host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "SoloHost" });
     const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as {
       roomId: string;
-      soloHostDeadlineAt: number | null;
+      soloDeadlineAt: number | null;
     };
     assert.ok(roomCreated, "room_created must be emitted");
     assert.ok(
-      typeof roomCreated.soloHostDeadlineAt === "number",
-      "room_created must include soloHostDeadlineAt for a solo host room"
+      typeof roomCreated.soloDeadlineAt === "number",
+      "room_created must include soloDeadlineAt for a solo host room"
     );
 
     // No guest joins — host remains the only participant
@@ -2066,10 +2066,10 @@ test("P3-LC-002 (P3-SH-007): solo-host timer handle is cleared when first guest 
     host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
     const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as {
       roomId: string;
-      soloHostDeadlineAt: number | null;
+      soloDeadlineAt: number | null;
     };
     assert.ok(roomCreated);
-    assert.ok(typeof roomCreated.soloHostDeadlineAt === "number", "Solo host deadline must be set on creation");
+    assert.ok(typeof roomCreated.soloDeadlineAt === "number", "Solo host deadline must be set on creation");
 
     // Capture the solo timer handle before the guest joins
     const soloTimer = scheduledTimeouts.find(

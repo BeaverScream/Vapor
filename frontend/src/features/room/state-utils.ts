@@ -29,7 +29,7 @@ export function createInitialRoomSessionState(screen: RoomSessionState['screen']
     activeRoomName: null,
     hostId: null,
     expiresAt: null,
-    soloHostDeadlineAt: null,
+    soloDeadlineAt: null,
     participants: [],
     participantCount: 0,
     chatMessages: [],
@@ -57,6 +57,7 @@ export function withSocketState(state: RoomSessionState, socketState: RoomSessio
 export function withRoomCreated(state: RoomSessionState, payload: RoomCreatedPayload): RoomSessionState {
   return {
     ...state,
+    ...clearSessionFields(),
     lobbyStatus: 'idle',
     errorMessage: null,
     screen: 'room',
@@ -65,22 +66,13 @@ export function withRoomCreated(state: RoomSessionState, payload: RoomCreatedPay
     activeRoomName: payload.roomName ?? null,
     hostId: payload.hostId,
     expiresAt: payload.expiresAt,
-    soloHostDeadlineAt: payload.soloHostDeadlineAt ?? null,
+    soloDeadlineAt: payload.soloDeadlineAt ?? null,
     participants: [{ participantId: payload.participantId, isHost: payload.participantId === payload.hostId }],
     participantCount: payload.participantCount,
-    chatMessages: [],
-    chatDraft: '',
-    chatConnectionState: 'idle',
-    connectedPeerCount: 0,
-    hostReconnectGraceDeadlineAt: null,
-    copyFeedback: null,
-    joinRateLimitUntil: null,
-    joinRateLimitRoomId: null,
     participantNicknames: payload.participantNickname
       ? { [payload.participantId]: payload.participantNickname }
       : {},
     hasPassword: payload.hasPassword ?? false,
-    typingPeerIds: [],
   }
 }
 
@@ -105,6 +97,7 @@ export function withRoomJoined(state: RoomSessionState, payload: RoomJoinedPaylo
 
   return {
     ...state,
+    ...clearSessionFields(),
     lobbyStatus: 'idle',
     errorMessage: null,
     screen: 'room',
@@ -113,20 +106,12 @@ export function withRoomJoined(state: RoomSessionState, payload: RoomJoinedPaylo
     activeRoomName: payload.roomName ?? null,
     hostId: payload.hostId,
     expiresAt: payload.expiresAt,
-    soloHostDeadlineAt: null,
+    soloDeadlineAt: payload.soloDeadlineAt ?? null,
     participants: nextParticipants,
     participantCount: payload.participantCount,
-    chatMessages: [],
-    chatDraft: '',
     chatConnectionState: nextParticipants.length > 1 ? 'connecting' : 'idle',
-    connectedPeerCount: 0,
-    hostReconnectGraceDeadlineAt: null,
-    copyFeedback: null,
-    joinRateLimitUntil: null,
-    joinRateLimitRoomId: null,
     participantNicknames,
     hasPassword: payload.hasPassword ?? false,
-    typingPeerIds: [],
   }
 }
 
@@ -143,7 +128,7 @@ export function withPeerJoined(state: RoomSessionState, payload: PeerJoinedPaylo
     ...state,
     participants,
     participantCount: payload.participantCount,
-    soloHostDeadlineAt: null,
+    soloDeadlineAt: null,
     participantNicknames,
   }
 }
@@ -267,17 +252,14 @@ export function roomEndedMessageFromReason(reason?: string): string {
   }
 }
 
-export function withRoomEnded(state: RoomSessionState, reason?: string): RoomSessionState {
+function clearSessionFields(): Partial<RoomSessionState> {
   return {
-    ...state,
-    screen: 'room-ended',
-    roomEndedMessage: roomEndedMessageFromReason(reason),
     participantId: null,
     activeRoomId: null,
     activeRoomName: null,
     hostId: null,
     expiresAt: null,
-    soloHostDeadlineAt: null,
+    soloDeadlineAt: null,
     participants: [],
     participantCount: 0,
     chatMessages: [],
@@ -285,6 +267,7 @@ export function withRoomEnded(state: RoomSessionState, reason?: string): RoomSes
     chatConnectionState: 'idle',
     connectedPeerCount: 0,
     hostReconnectGraceDeadlineAt: null,
+    roomIdInput: '',
     roomNameInput: '',
     passwordInput: '',
     nicknameInput: '',
@@ -297,36 +280,24 @@ export function withRoomEnded(state: RoomSessionState, reason?: string): RoomSes
   }
 }
 
+export function withRoomEnded(state: RoomSessionState, reason?: string): RoomSessionState {
+  return {
+    ...state,
+    ...clearSessionFields(),
+    screen: 'room-ended',
+    roomEndedMessage: roomEndedMessageFromReason(reason),
+  }
+}
+
 export function resetToLobby(state: RoomSessionState): RoomSessionState {
   return {
     ...state,
+    ...clearSessionFields(),
     lobbyMode: 'create',
     screen: 'lobby',
     lobbyStatus: 'idle',
     errorMessage: null,
     roomEndedMessage: UI_COPY.ROOM_ENDED,
-    participantId: null,
-    activeRoomId: null,
-    activeRoomName: null,
-    hostId: null,
-    expiresAt: null,
-    soloHostDeadlineAt: null,
-    participants: [],
-    participantCount: 0,
-    chatMessages: [],
-    chatDraft: '',
-    chatConnectionState: 'idle',
-    connectedPeerCount: 0,
-    hostReconnectGraceDeadlineAt: null,
-    roomNameInput: '',
-    passwordInput: '',
-    nicknameInput: '',
-    copyFeedback: null,
-    joinRateLimitUntil: null,
-    joinRateLimitRoomId: null,
-    participantNicknames: {},
-    hasPassword: false,
-    typingPeerIds: [],
   }
 }
 
@@ -376,6 +347,10 @@ export function withKickedFromRoom(state: RoomSessionState): RoomSessionState {
   return {
     ...withRoomEnded(state),
     roomEndedMessage: UI_COPY.KICKED_FROM_ROOM,
+    lobbyMode: 'create',
+    lobbyStatus: 'idle',
+    errorMessage: null,
+    roomIdInput: '',
   }
 }
 

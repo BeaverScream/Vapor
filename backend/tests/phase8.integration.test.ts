@@ -229,7 +229,7 @@ test("T8.2-02 variant: kicked participant can immediately join a different room 
 
 // ---- VP-8.2: Solo-timer restart on kick ----
 
-test("T8.2-03: kicking last guest emits peer_left with soloHostDeadlineAt to host", () => {
+test("T8.2-03: kicking last guest emits peer_left with soloDeadlineAt to host", () => {
   const TIME = 1_000_000;
   const { io } = setupHarness({ now: () => TIME });
   const host = io.connect("socket-host");
@@ -253,51 +253,68 @@ test("T8.2-03: kicking last guest emits peer_left with soloHostDeadlineAt to hos
     participantId: string;
     reason: string;
     participantCount: number;
-    soloHostDeadlineAt?: number | null;
+    soloDeadlineAt?: number | null;
   };
 
   assert.ok(peerLeft, "host must receive peer_left after kicking last guest");
   assert.equal(peerLeft.participantId, guestJoined.participantId);
   assert.equal(peerLeft.participantCount, 1, "only host remains");
   assert.ok(
-    typeof peerLeft.soloHostDeadlineAt === "number",
-    "soloHostDeadlineAt must be a number when kick reduces room to host-only",
+    typeof peerLeft.soloDeadlineAt === "number",
+    "soloDeadlineAt must be a number when kick reduces room to host-only",
   );
   assert.equal(
-    peerLeft.soloHostDeadlineAt,
+    peerLeft.soloDeadlineAt,
     TIME + SOLO_HOST_ROOM_TIMEOUT_MS,
-    "soloHostDeadlineAt must equal now() + SOLO_HOST_ROOM_TIMEOUT_MS",
+    "soloDeadlineAt must equal now() + SOLO_HOST_ROOM_TIMEOUT_MS",
   );
 });
 
-test("T8.2-04: voluntary guest leave emits peer_left without soloHostDeadlineAt", () => {
-  const { io } = setupHarness();
-  const host = io.connect("socket-host");
-  const guest = io.connect("socket-guest");
+test("T8.2-04: non-last guest voluntary leave does not set soloDeadlineAt (other guests remain)", () => {
+  // Phase 9 (T9.1.1): leaveRoom now sets soloDeadlineAt when the last guest leaves and
+  // the host is left alone. This test verifies the complementary case: when a guest leaves
+  // but another guest still remains, soloDeadlineAt must NOT be included in peer_left.
+  let participantCounter = 0;
+  const { io } = setupHarness({
+    generateParticipantId: () => {
+      participantCounter += 1;
+      return `P-${participantCounter}`;
+    },
+  });
+  const host   = io.connect("socket-host");
+  const guest1 = io.connect("socket-guest-1");
+  const guest2 = io.connect("socket-guest-2");
 
   host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
   const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
 
-  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest" });
-  guest.popEvent(SERVER_EVENTS.roomJoined);
+  guest1.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest1" });
+  guest1.popEvent(SERVER_EVENTS.roomJoined);
   host.popEvent(SERVER_EVENTS.peerJoined);
 
-  guest.trigger(CLIENT_EVENTS.leaveRoom, {});
+  guest2.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest2" });
+  guest2.popEvent(SERVER_EVENTS.roomJoined);
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  // guest1 leaves — host + guest2 remain, so host is NOT solo
+  guest1.trigger(CLIENT_EVENTS.leaveRoom, {});
 
   const peerLeft = host.popEvent(SERVER_EVENTS.peerLeft) as {
     participantId: string;
-    soloHostDeadlineAt?: number | null;
+    participantCount: number;
+    soloDeadlineAt?: number | null;
   };
 
-  assert.ok(peerLeft, "host must receive peer_left after guest voluntary leave");
+  assert.ok(peerLeft, "host must receive peer_left after guest1 voluntary leave");
+  assert.equal(peerLeft.participantCount, 2, "host + guest2 still in room");
   assert.equal(
-    peerLeft.soloHostDeadlineAt,
+    peerLeft.soloDeadlineAt,
     undefined,
-    "voluntary leave must not include soloHostDeadlineAt in peer_left",
+    "soloDeadlineAt must not be set when other participants remain after the leave",
   );
 });
 
-test("T8.2-03 variant: kick of non-last guest does not set soloHostDeadlineAt", () => {
+test("T8.2-03 variant: kick of non-last guest does not set soloDeadlineAt", () => {
   let participantCounter = 0;
   const { io } = setupHarness({
     generateParticipantId: () => {
@@ -329,15 +346,15 @@ test("T8.2-03 variant: kick of non-last guest does not set soloHostDeadlineAt", 
   host.popEvent(SERVER_EVENTS.participantKicked);
   const peerLeft = host.popEvent(SERVER_EVENTS.peerLeft) as {
     participantCount: number;
-    soloHostDeadlineAt?: number | null;
+    soloDeadlineAt?: number | null;
   };
 
   assert.ok(peerLeft);
   assert.equal(peerLeft.participantCount, 2, "host + guest2 remain");
   assert.equal(
-    peerLeft.soloHostDeadlineAt,
+    peerLeft.soloDeadlineAt,
     undefined,
-    "soloHostDeadlineAt must not be set when guest2 is still present",
+    "soloDeadlineAt must not be set when guest2 is still present",
   );
 });
 

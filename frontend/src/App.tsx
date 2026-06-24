@@ -82,7 +82,7 @@ function App() {
         participantNicknames: state.participantNicknames,
         roomStatus: derived.roomStatus,
         chatStatusText: derived.chatStatusText,
-        soloHostDeadlineAt: derived.soloHostDeadlineAt,
+        soloDeadlineAt: derived.soloDeadlineAt,
         expiresAt: derived.expiresAt,
         hasPassword: state.hasPassword,
         copyFeedback: state.copyFeedback,

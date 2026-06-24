@@ -56,6 +56,9 @@ export type ErrorCode =
   | typeof SIGNALING_ERROR_CODES.ROOM_FULL
   | typeof SIGNALING_ERROR_CODES.ROOM_EXPIRED
   | typeof SIGNALING_ERROR_CODES.INVALID_PASSWORD
+  | typeof SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED
+  | typeof SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE
+  | typeof SIGNALING_ERROR_CODES.NOT_AUTHORIZED
   | typeof SIGNALING_ERROR_CODES.RATE_LIMITED
   | 'UNKNOWN'
   | typeof SIGNALING_ERROR_CODES.INVALID_SIGNAL_PAYLOAD
@@ -156,7 +159,7 @@ export interface RoomSessionState {
   activeRoomName: string | null
   hostId: string | null
   expiresAt: number | null
-  soloHostDeadlineAt: number | null
+  soloDeadlineAt: number | null
   participants: Participant[]
   participantCount: number
   chatMessages: ChatMessage[]

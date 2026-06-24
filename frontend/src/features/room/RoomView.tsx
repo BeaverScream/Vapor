@@ -16,7 +16,7 @@ interface RoomViewProps {
   participantNicknames: Record<string, string>
   roomStatus: string
   chatStatusText: string
-  soloHostDeadlineAt: number | null
+  soloDeadlineAt: number | null
   expiresAt: number | null
   hasPassword: boolean
   copyFeedback: string | null
@@ -417,16 +417,16 @@ const DiagnosticsOverlay = memo(function DiagnosticsOverlay() {
   )
 })
 
-const SoloWaitingChip = memo(function SoloWaitingChip({ soloHostDeadlineAt }: { soloHostDeadlineAt: number | null }) {
+const SoloWaitingChip = memo(function SoloWaitingChip({ soloDeadlineAt }: { soloDeadlineAt: number | null }) {
   const [nowMs, setNowMs] = useState(() => Date.now())
 
   useEffect(() => {
-    if (!soloHostDeadlineAt) return
+    if (!soloDeadlineAt) return
     const id = window.setInterval(() => setNowMs(Date.now()), 1000)
     return () => window.clearInterval(id)
-  }, [soloHostDeadlineAt])
+  }, [soloDeadlineAt])
 
-  const soloWaitingChipText = getSoloWaitingText(soloHostDeadlineAt, nowMs)
+  const soloWaitingChipText = getSoloWaitingText(soloDeadlineAt, nowMs)
   if (!soloWaitingChipText) return null
 
   return (
@@ -506,7 +506,7 @@ export const RoomView = memo(function RoomView({
   participantNicknames,
   roomStatus,
   chatStatusText,
-  soloHostDeadlineAt,
+  soloDeadlineAt,
   expiresAt,
   hasPassword,
   copyFeedback,
@@ -623,7 +623,7 @@ export const RoomView = memo(function RoomView({
 
         <div className="flex flex-wrap items-center gap-2">
           <RoomSecurityIndicator hasPassword={hasPassword} />
-          <SoloWaitingChip soloHostDeadlineAt={soloHostDeadlineAt} />
+          <SoloWaitingChip soloDeadlineAt={soloDeadlineAt} />
           <RoomLifetimeChip expiresAt={expiresAt} />
           <Button type="button" variant="ghost" size="sm" onClick={() => { void onCopyRoomId() }} aria-label="Copy room ID" className="ml-auto min-h-11">
             <CopyIcon />

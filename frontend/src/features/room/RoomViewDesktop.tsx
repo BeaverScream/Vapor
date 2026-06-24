@@ -15,7 +15,7 @@ interface RoomViewDesktopProps {
   participantNicknames: Record<string, string>
   roomStatus: string
   chatStatusText: string
-  soloHostDeadlineAt: number | null
+  soloDeadlineAt: number | null
   expiresAt: number | null
   hasPassword: boolean
   copyFeedback: string | null
@@ -206,15 +206,15 @@ const DiagnosticsOverlay = memo(function DiagnosticsOverlay() {
   )
 })
 
-const SoloWaitingChip = memo(function SoloWaitingChip({ soloHostDeadlineAt }: { soloHostDeadlineAt: number | null }) {
+const SoloWaitingChip = memo(function SoloWaitingChip({ soloDeadlineAt }: { soloDeadlineAt: number | null }) {
   const [nowMs, setNowMs] = useState(() => Date.now())
   useEffect(() => {
-    if (!soloHostDeadlineAt) return
+    if (!soloDeadlineAt) return
     const id = window.setInterval(() => setNowMs(Date.now()), 1000)
     return () => window.clearInterval(id)
-  }, [soloHostDeadlineAt])
+  }, [soloDeadlineAt])
 
-  const text = getSoloWaitingText(soloHostDeadlineAt, nowMs)
+  const text = getSoloWaitingText(soloDeadlineAt, nowMs)
   if (!text) return null
   return (
     <span className="rounded-full border border-warning-line bg-warning px-2.5 py-1 text-[11px] font-medium text-warning-foreground">
@@ -349,7 +349,7 @@ export const RoomViewDesktop = memo(function RoomViewDesktop({
   participantNicknames,
   roomStatus,
   chatStatusText,
-  soloHostDeadlineAt,
+  soloDeadlineAt,
   expiresAt,
   hasPassword,
   copyFeedback,
@@ -470,7 +470,7 @@ export const RoomViewDesktop = memo(function RoomViewDesktop({
             {hasPassword ? <LockClosedIcon /> : <LockOpenIcon />}
             {hasPassword ? 'Protected' : 'Open'}
           </span>
-          <SoloWaitingChip soloHostDeadlineAt={soloHostDeadlineAt} />
+          <SoloWaitingChip soloDeadlineAt={soloDeadlineAt} />
           <RoomLifetimeChip expiresAt={expiresAt} />
           <Button type="button" variant="ghost" size="sm" onClick={() => { void onCopyRoomId() }} aria-label="Copy room ID" className="ml-auto min-h-9">
             <CopyIcon />

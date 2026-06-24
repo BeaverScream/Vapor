@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { JOIN_RATE_LIMIT_COOLDOWN_MS, UI_COPY } from './constants'
+import { JOIN_RATE_LIMIT_COOLDOWN_MS, RECONNECT_SESSION_STORAGE_KEY, UI_COPY } from './constants'
 import { getErrorMessage, getJoinRateLimitedMessage, mapErrorCode } from './error-copy'
 import { SIGNALING_ERROR_CODES } from '@shared'
 import { getConnectionStatusText, getRoomStatus } from './participant-utils'
@@ -54,7 +54,6 @@ import type {
 import {
   useSessionPersistence,
   readStoredReconnectSession,
-  clearStoredReconnectSession,
 } from './hooks/useSessionPersistence'
 import { useJoinRateLimit } from './hooks/useJoinRateLimit'
 import { useTypingIndicator } from './hooks/useTypingIndicator'
@@ -86,9 +85,9 @@ function emitSafeWebRtcTelemetry(event: WebRtcTelemetryEvent): void {
   window.dispatchEvent(new CustomEvent('vapor:webrtc-state', { detail: event }))
 }
 
-export function getSoloWaitingText(soloHostDeadlineAt: number | null, nowMs: number): string | null {
-  if (!soloHostDeadlineAt) return null
-  const remainingMs = Math.max(soloHostDeadlineAt - nowMs, 0)
+export function getSoloWaitingText(soloDeadlineAt: number | null, nowMs: number): string | null {
+  if (soloDeadlineAt === null || soloDeadlineAt === undefined) return null
+  const remainingMs = Math.max(soloDeadlineAt - nowMs, 0)
   if (remainingMs <= 0) return null
   const totalSeconds = Math.ceil(remainingMs / 1000)
   const minutes = Math.floor(totalSeconds / 60)
@@ -101,7 +100,7 @@ export function getSoloWaitingText(soloHostDeadlineAt: number | null, nowMs: num
 }
 
 export function getLifetimeText(expiresAt: number | null, nowMs: number): string | null {
-  if (!expiresAt) return null
+  if (expiresAt === null || expiresAt === undefined) return null
   const remainingMs = Math.max(expiresAt - nowMs, 0)
   if (remainingMs <= 0) return null
   const totalSeconds = Math.floor(remainingMs / 1000)
@@ -127,7 +126,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     roomStatus: string
     connectionText: string
     expiresAt: number | null
-    soloHostDeadlineAt: number | null
+    soloDeadlineAt: number | null
     chatStatusText: string
   }
 } {
@@ -138,7 +137,6 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
 
   const createSocketClientRef = useRef(createSocketClient)
   createSocketClientRef.current = createSocketClient
-
   const writeClipboardTextRef = useRef(writeClipboardText)
   writeClipboardTextRef.current = writeClipboardText
 
@@ -176,6 +174,8 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     typing.clearAll()
     resumeInFlightRef.current = false
     autoResumeRequestedRef.current = false
+    // resumeInFlightRef / autoResumeRequestedRef are stable React refs, not reactive deps — do not add them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [disposePeerMesh, chat.clearPending, typing.clearAll])
 
   const createPeerMesh = useCallback(
@@ -212,6 +212,8 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       peerMeshRef.current = peerMesh
       return peerMesh
     },
+    // socketRef / peerMeshRef are stable React refs, not reactive deps — do not add them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [disposePeerMesh, chat.onRemoteMessage, typing.onRemoteTypingStatus, chat.flushPendingMessages, notifyNewMessage],
   )
 
@@ -230,6 +232,8 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     resumeInFlightRef.current = true
     autoResumeRequestedRef.current = true
     socketRef.current?.emitResumeSession(storedSession)
+    // socketRef / socketStateRef / resumeInFlightRef / autoResumeRequestedRef are stable React refs, not reactive deps — do not add them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persistence.readStoredReconnectSession])
 
   const onDisconnect = useCallback((): void => {
@@ -239,17 +243,26 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
 
   const onRoomCreated = useCallback(
     (payload: RoomCreatedPayload): void => {
-      persistence.writeStoredReconnectSession({
-        roomId: payload.roomId,
-        reconnectToken: payload.reconnectToken,
-      })
+      try {
+        sessionStorage.setItem(
+          RECONNECT_SESSION_STORAGE_KEY,
+          JSON.stringify({
+            roomId: payload.roomId,
+            reconnectToken: payload.reconnectToken,
+          }),
+        )
+      } catch {
+        // Ignore sessionStorage errors
+      }
       resumeInFlightRef.current = false
       autoResumeRequestedRef.current = false
       setState((previous) => withRoomCreated(previous, payload))
       createPeerMesh(payload.roomId, payload.participantId)
       requestPermission()
     },
-    [persistence.writeStoredReconnectSession, createPeerMesh, requestPermission],
+    // resumeInFlightRef / autoResumeRequestedRef are stable React refs, not reactive deps — do not add them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [createPeerMesh, requestPermission],
   )
 
   const onRoomJoined = useCallback(
@@ -263,9 +276,15 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       setState((previous) => withRoomJoined(previous, payload))
       const peerMesh = createPeerMesh(payload.roomId, payload.participantId)
       peerMesh.syncPeers(payload.peers.map((peer) => peer.participantId))
+      const socket = socketRef.current
+      if (socket) {
+        socket.onNicknameUpdated(onNicknameUpdated)
+      }
       requestPermission()
     },
-    [persistence.writeStoredReconnectSession, createPeerMesh, requestPermission],
+    // resumeInFlightRef / autoResumeRequestedRef are stable React refs; onNicknameUpdated closure is stable
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [createPeerMesh, requestPermission],
   )
 
   const onPeerJoined = useCallback((payload: PeerJoinedPayload): void => {
@@ -290,8 +309,8 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       const name = previous.participantNicknames[payload.participantId] ?? payload.participantId.slice(0, 8)
       const action = payload.reason === 'disconnect' ? 'disconnected' : 'left'
       let nextState = withAppendedChatMessage(withPeerLeft(previous, payload), createChatMessage(payload.participantId, `${name} ${action}`, 'system'))
-      if (payload.soloHostDeadlineAt !== undefined && payload.soloHostDeadlineAt !== null) {
-        nextState = { ...nextState, soloHostDeadlineAt: payload.soloHostDeadlineAt }
+      if (payload.soloDeadlineAt !== undefined && payload.soloDeadlineAt !== null) {
+        nextState = { ...nextState, soloDeadlineAt: payload.soloDeadlineAt }
       }
       if (nextState.participantCount <= 1) {
         chat.pendingMessagesRef.current = []
@@ -345,7 +364,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   const onParticipantKicked = useCallback(
     (payload: ParticipantKickedPayload): void => {
       if (payload.participantId === stateRef.current.participantId) {
-        clearStoredReconnectSession()
+        persistence.clearStoredReconnectSession()
         clearRoomSession()
         socketRef.current?.disconnect()
         setTimeout(() => socketRef.current?.connect(), 0)
@@ -364,7 +383,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
 
   const onRoomDestroyed = useCallback(
     (payload: RoomDestroyedPayload): void => {
-      clearStoredReconnectSession()
+      persistence.clearStoredReconnectSession()
       clearRoomSession()
       setState((previous) => withRoomEnded(previous, payload.reason))
     },
@@ -384,7 +403,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
           errorCode === SIGNALING_ERROR_CODES.INVALID_PASSWORD ||
           errorCode === SIGNALING_ERROR_CODES.RATE_LIMITED
         ) {
-          clearStoredReconnectSession()
+          persistence.clearStoredReconnectSession()
           return resetToLobby(previous)
         }
       }
@@ -527,13 +546,21 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     if (socket && roomId) {
       socket.emitLeaveRoom({ roomId })
     }
-    clearStoredReconnectSession()
+    try {
+      sessionStorage.removeItem('vapor-reconnect-session')
+    } catch {
+      // Ignore sessionStorage errors
+    }
     clearRoomSession()
     setState((previous) => resetToLobby(previous))
   }, [clearRoomSession])
 
   const backToLobby = useCallback((): void => {
-    clearStoredReconnectSession()
+    try {
+      sessionStorage.removeItem('vapor-reconnect-session')
+    } catch {
+      // Ignore sessionStorage errors
+    }
     clearRoomSession()
     setState((previous) => resetToLobby(previous))
   }, [clearRoomSession])
@@ -559,11 +586,11 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     [state.chatConnectionState, state.connectedPeerCount, state.participantCount],
   )
   const effectiveExpiresAt = useMemo(() => {
-    const deadlines = [state.expiresAt, state.hostReconnectGraceDeadlineAt, state.soloHostDeadlineAt].filter(
+    const deadlines = [state.expiresAt, state.hostReconnectGraceDeadlineAt, state.soloDeadlineAt].filter(
       (d): d is number => d !== null,
     )
     return deadlines.length === 0 ? null : Math.min(...deadlines)
-  }, [state.expiresAt, state.hostReconnectGraceDeadlineAt, state.soloHostDeadlineAt])
+  }, [state.expiresAt, state.hostReconnectGraceDeadlineAt, state.soloDeadlineAt])
 
   const actions = useMemo<RoomSessionActions>(
     () => ({
@@ -611,7 +638,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       roomStatus,
       connectionText,
       expiresAt: effectiveExpiresAt,
-      soloHostDeadlineAt: null,
+      soloDeadlineAt: state.soloDeadlineAt,
       chatStatusText,
     },
   }
