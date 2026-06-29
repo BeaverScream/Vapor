@@ -3,6 +3,10 @@ import { JOIN_INVALID_ATTEMPT_COOLDOWN_MS } from '@shared'
 export const SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL ?? 'http://localhost:3001'
 export const JOIN_RATE_LIMIT_COOLDOWN_MS = JOIN_INVALID_ATTEMPT_COOLDOWN_MS
 export const RECONNECT_SESSION_STORAGE_KEY = 'vapor.reconnect.session'
+// Per-room chat history is persisted (session-scoped, tab-local) under
+// `${CHAT_HISTORY_STORAGE_KEY_PREFIX}<roomId>` so an accidental TCP drop +
+// reconnect restores the snapshot. Cleared only on terminal events (VP-10.4).
+export const CHAT_HISTORY_STORAGE_KEY_PREFIX = 'vapor.chat:'
 
 function parseIceUrlList(rawValue: string | undefined, fallback: string[]): string[] {
   if (!rawValue) {

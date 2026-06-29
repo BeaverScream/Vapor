@@ -1,7 +1,60 @@
 import { useCallback, useRef } from 'react'
+import { CHAT_HISTORY_STORAGE_KEY_PREFIX } from '../constants'
 import { withAppendedChatMessage, withChatDraft } from '../state-utils'
 import type { ChatMessage, RoomSessionState } from '../types'
 import type { VaporWebRtcChatMesh } from '../webrtc-chat-mesh'
+
+function chatHistoryKey(roomId: string): string {
+  return `${CHAT_HISTORY_STORAGE_KEY_PREFIX}${roomId}`
+}
+
+function isChatMessage(value: unknown): value is ChatMessage {
+  if (value === null || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    typeof candidate.messageId === 'string' &&
+    typeof candidate.senderParticipantId === 'string' &&
+    typeof candidate.text === 'string' &&
+    typeof candidate.sentAtMs === 'number' &&
+    (candidate.direction === 'outgoing' ||
+      candidate.direction === 'incoming' ||
+      candidate.direction === 'system')
+  )
+}
+
+// Persist the room's chat snapshot to sessionStorage (tab-local, session-scoped).
+// Single entry per room — overwritten, not appended — so reconnect restores the
+// latest state (VP-10.4). Storage failures (quota / unavailable) are non-fatal.
+export function saveChatHistory(roomId: string | null | undefined, messages: ChatMessage[]): void {
+  if (!roomId) return
+  try {
+    window.sessionStorage.setItem(chatHistoryKey(roomId), JSON.stringify(messages))
+  } catch {
+    // Ignore sessionStorage write errors (quota / private mode / unavailable).
+  }
+}
+
+export function loadChatHistory(roomId: string | null | undefined): ChatMessage[] {
+  if (!roomId) return []
+  try {
+    const rawValue = window.sessionStorage.getItem(chatHistoryKey(roomId))
+    if (!rawValue) return []
+    const parsed = JSON.parse(rawValue) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(isChatMessage)
+  } catch {
+    return []
+  }
+}
+
+export function clearChatHistory(roomId: string | null | undefined): void {
+  if (!roomId) return
+  try {
+    window.sessionStorage.removeItem(chatHistoryKey(roomId))
+  } catch {
+    // Ignore sessionStorage removal errors.
+  }
+}
 
 function createMessageId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {

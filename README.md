@@ -1,118 +1,147 @@
-# 💨 Vapor
-**"Communication that evaporates."**
+# Vapor
 
-Vapor is a high-performance, zero-persistence communication utility designed for instant, secure interactions. It eliminates the friction of modern messaging by providing a browser-based "bridge" for chat and file sharing that vanishes without a trace once the session is over.
+**Privacy first. Ephemeral by design.**
 
----
-
-### 🌟 Core Philosophy: "Easy Use, Easy Drop"
-* **Zero Onboarding:** No accounts, no apps, no phone numbers. Access is instant with a room link and password.
-* **Easy Use:** Create a room with a password, share the returned room ID, then join with the exact same room ID (case-sensitive) and matching password.
-* **Zero Persistence:** Room/session state lives only in server RAM and is removed when the room ends. Each room is limited to a maximum 2-hour lifetime.
-* **Host-Sovereign Volatility:** The host controls room lifetime. If the host leaves (or misses reconnect grace), the room is destroyed.
-* **Password-Protected Entry:** Guests join with room ID + host-defined password.
-* **Privacy Protected:** The server is only used to connect participants. Messages and file transfers are shared directly between users.
-
-### ❓ FAQ
-
-**Why did my room end even before 2 hours?**  
-Vapor enforces a maximum 2-hour TTL, but rooms can end earlier by lifecycle policy:
-- host leaves (`host_left`),
-- host reconnect grace expires (`host_grace_expired`),
-- host-only room times out before any guest joins (`solo_timeout_expired`),
-- or full TTL is reached (`room_ttl_expired`).
-
-**What happens after repeated wrong password attempts? (THIS OUTDATED)**  
-Join-attempt policy is enforced per room + subject key:
-- attempts 1-3: rejected as `INVALID_PASSWORD` with no cooldown,
-- attempts 4-5: 10-minute cooldown (attempts during cooldown return `RATE_LIMITED`),
-- attempts greater than 5: strict lockout until room destruction (`RATE_LIMITED`).
+Vapor is a zero-persistence, browser-based chat utility. No accounts, no logs, no history — rooms exist only in server RAM and vanish when the session ends. Messages and files travel directly between users over WebRTC; the server handles signaling only.
 
 ---
 
-### 🛠️ Technical Stack (The "Lean" Architecture)
-Built to be lightweight, type-safe, and professional:
+## User Guide
 
-* **Frontend:** **React + TypeScript** (Vite-powered) for a lightning-fast, crash-resistant user experience.
-* **Styling:** **Tailwind CSS** with GPU-accelerated background animations (mist/smoke effect).
-* **Backend:** **Node.js + Express + TypeScript** (Stateless/No Database) to ensure zero data retention.
-* **Real-time:** **Socket.io** for signaling and instant group coordination.
-* **Data Transfer:** **WebRTC Data Channels** (P2P) for high-speed, direct device-to-device file sharing.
-* **Admin Observability:** Optional **Socket.IO Admin UI** + RAM-only metrics endpoint for operational visibility.
+### The Lobby
+
+![Vapor Lobby](docs/UI_design/current/LobbyView_phase7_blue.jpg)
+
+The lobby is the single entry point. Switch between **Create** and **Join** tabs depending on your role.
 
 ---
 
-### 🛡️ Privacy & Encryption
-* **Peer Encryption:** WebRTC data channels use DTLS/SRTP. Data moves directly between browsers, so the server does not relay your files.
-* **Encrypted Signaling:** All room coordination and initial chat messages are wrapped in **TLS/SSL (HTTPS/WSS)**, protecting users on public Wi-Fi.
-* **Stateless Auth:** Password verification data lives only in server RAM. There is no database history to breach.
+### Creating a Room
+
+1. Select the **Create** tab.
+2. Enter an optional **Room Key** (password). Leave blank for an open room.
+3. Enter a **Nickname** (3–24 characters).
+4. Click **+ Create room**.
+
+On success, you enter the room as the **host**. You'll receive a Room ID — share it (and the password if you set one) with participants you want to invite.
+
+> **Optional room name:** You can also set a custom room name (3–24 characters, letters/digits/hyphens/underscores) instead of using the auto-generated Room ID. Custom names must be unique across active rooms. Guests can join using the room name or the raw Room ID — both work.
+
+**Host limits and rules:**
+- Maximum 5 participants per room (host included).
+- The host controls the room's lifetime — leaving immediately destroys the room for everyone.
+- Once set, neither the room name nor the password can be changed.
 
 ---
 
-### 📈 Competitive Advantage
+### Joining a Room
 
-| Feature | Traditional Apps (Zoom/Teams) | **Vapor** |
-| :--- | :--- | :--- |
-| **Setup** | Heavy (Account/App) | **Instant (Room + Password)** |
-| **Persistence** | Permanent Logs/History | **Volatile (Self-destructs)** |
-| **Data Privacy** | Server-side storage | **P2P (Client-to-Client)** |
-| **Access** | Email Invites/Links | **Password-Locked Bridge** |
+1. Select the **Join** tab.
+2. Enter the **Room ID** (or custom room name) shared by the host. Room IDs are case-sensitive.
+3. Enter the **Room Key** if the room is password-protected.
+4. Enter your **Nickname** (3–24 characters, must be unique within the room).
+5. Click **Join room**.
+
+On success you enter the room as a **guest** and the P2P mesh is established automatically.
+
+**Common join errors:**
+
+| Error | Meaning |
+|---|---|
+| Room not found | The Room ID doesn't exist or the room has already ended. |
+| Incorrect password | Wrong or missing password for a protected room. |
+| Room is full | The room already has 5 participants. |
+| Nickname taken | Choose a different nickname — your preferred one is reserved by another participant. |
+| Too many attempts | Temporary rate limit from the server. Wait before retrying. |
 
 ---
 
-### ▶️ Run Locally (without Docker)
-1. Install root utilities:
-	```bash
-	npm install
-	```
-2. Install backend dependencies:
-	```bash
-	cd backend && npm install
-	```
-3. (Optional) Type-check backend:
-	```bash
-	cd backend && npm run typecheck
-	```
-4. Start both frontend and backend from the project root:
-	```bash
-	npm run dev
-	```
+### In the Room
 
-### 🐳 Run with Docker
-From the project root:
+Once connected, all messages and file transfers flow directly peer-to-peer (WebRTC). The server is no longer in the data path.
+
+**Room header** shows the Room ID with a copy button and a live countdown timer displaying the time until the room expires. The timer hides automatically when you're typing and reappears when you stop.
+
+**Participant list** shows all connected participants with color-coded nicknames. On mobile it is collapsed by default; on desktop it is open by default.
+
+**Leaving:** Click the Leave button. As a guest, you return to the lobby and the room continues for others. As the host, leaving immediately destroys the room for everyone.
+
+---
+
+### Disconnects and Reconnection
+
+Vapor distinguishes between **voluntary leave** (you clicked Leave) and an **unexpected disconnect** (network drop, browser crash, tab refresh).
+
+#### If you disconnect unexpectedly
+
+Your session is held open with a grace window so you can reconnect without losing your nickname or place in the room. On page refresh or reconnect, Vapor automatically attempts to resume your session.
+
+| Role | Grace window |
+|---|---|
+| Host | 60 minutes |
+| Guest | 30 minutes |
+
+During your grace window, other participants see you as offline but the room stays alive. Your nickname is reserved — no one else can take it while your grace is active.
+
+If you reconnect within the window, your session is fully restored and chat history (stored locally in your tab) reloads. If the window expires, your session is permanently evicted and you must join as a new participant.
+
+#### If the host disconnects
+
+Guests see a **host grace banner** showing a countdown. The room stays active and chat continues normally during this time. If the host returns within 60 minutes, the banner clears and the room resumes. If the host does not return, the room is destroyed when the grace timer expires.
+
+---
+
+### Room Lifetime and Destruction
+
+Every room has a **2-hour maximum lifetime** regardless of activity. Rooms can also end earlier:
+
+| Reason | What happened |
+|---|---|
+| Host left | Host clicked Leave. Room ends immediately. |
+| Host did not return in time | Host disconnected and the 60-minute grace window expired. |
+| Room lifetime ended | The 2-hour maximum TTL was reached. |
+| No active participants for too long | Only one participant (or none) remained in the room for 15 minutes with no return. |
+
+When a room ends you are taken to the **Room Ended** screen with a short reason message and a button to return to the lobby.
+
+---
+
+### Privacy and Encryption
+
+- **P2P data path:** Messages and files travel directly between browsers via WebRTC Data Channels (DTLS-encrypted). The server never sees your content.
+- **Signaling encryption:** Room setup and coordination use TLS/WSS.
+- **Zero persistence:** All room state lives only in server RAM. It is gone when the room ends or the server restarts. No database. No logs. No history.
+
+---
+
+## Stack
+
+| Layer | Tech |
+|---|---|
+| Frontend | React + TypeScript (Vite) + Tailwind CSS |
+| Backend | Node.js + Express + TypeScript |
+| Real-time | Socket.IO (signaling only) |
+| P2P | WebRTC Data Channels |
+
+---
+
+## Run Locally
 
 ```bash
-npm run docker:up
+# Install dependencies
+npm install
+cd backend && npm install && cd ..
+
+# Start frontend + backend (from project root)
+npm run dev
 ```
 
 - Frontend: `http://localhost:5173`
-- Backend health: `http://localhost:3001/health`
-Stop containers:
+- Backend: `http://localhost:3001`
+
+## Run with Docker
 
 ```bash
-npm run docker:down
+npm run docker:up   # start
+npm run docker:down # stop
 ```
-
-<!-- ### 🔎 Admin Dashboard (Optional)
-
-Vapor includes a separate backend admin module for live operational metrics while preserving zero-persistence behavior.
-
-- JSON metrics endpoint: `GET /admin/metrics`
-- Socket-level dashboard: Socket.IO Admin UI
-
-Required backend environment variables:
-
-- `ADMIN_METRICS_TOKEN` for `/admin/metrics` (send as `x-admin-token` header)
-- `ADMIN_UI_USERNAME` and `ADMIN_UI_PASSWORD` to enable Socket.IO Admin UI basic auth
-- `ADMIN_UI_ORIGIN` (optional, default: `https://admin.socket.io`)
-
-Example:
-
-```bash
-ADMIN_METRICS_TOKEN=replace-me
-ADMIN_UI_USERNAME=admin
-ADMIN_UI_PASSWORD=strong-secret
-ADMIN_UI_ORIGIN=https://admin.socket.io
-```
-
-The admin module exposes RAM usage, active users, active rooms, cumulative joins, uptime, and aggregate connection-hours. No room credentials, signaling payloads, or message/file content are persisted. -->

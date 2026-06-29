@@ -9,24 +9,23 @@ const stateUtilsSource = readFileSync(resolve(ROOT, 'src/features/room/state-uti
 const errorCopySource  = readFileSync(resolve(ROOT, 'src/features/room/error-copy.ts'), 'utf8')
 const useVaporRoomSource = readFileSync(resolve(ROOT, 'src/features/room/useVaporRoom.ts'), 'utf8')
 
-// ---- T9.1-04: withKickedFromRoom resets lobby fields ----
+// ---- withKickedFromRoom resets lobby fields ----
 
-test('T9.1-04: withKickedFromRoom sets lobbyMode to "create"', () => {
+test('withKickedFromRoom sets lobbyMode to "create"', () => {
   assert.ok(
     stateUtilsSource.includes("lobbyMode: 'create'"),
     'withKickedFromRoom must explicitly set lobbyMode to "create"',
   )
 })
 
-test('T9.1-04: withKickedFromRoom sets lobbyStatus to "idle"', () => {
+test('withKickedFromRoom sets lobbyStatus to "idle"', () => {
   assert.ok(
     stateUtilsSource.includes("lobbyStatus: 'idle'"),
     'withKickedFromRoom must explicitly set lobbyStatus to "idle"',
   )
 })
 
-test('T9.1-04: withKickedFromRoom sets errorMessage to null', () => {
-  // The function body should have errorMessage: null after the withRoomEnded spread
+test('withKickedFromRoom sets errorMessage to null', () => {
   const fnMatch = stateUtilsSource.match(/function withKickedFromRoom[\s\S]*?^}/m)
   assert.ok(fnMatch, 'withKickedFromRoom function must exist in state-utils.ts')
   assert.ok(
@@ -35,7 +34,7 @@ test('T9.1-04: withKickedFromRoom sets errorMessage to null', () => {
   )
 })
 
-test("T9.1-04: withKickedFromRoom sets roomIdInput to ''", () => {
+test("withKickedFromRoom sets roomIdInput to ''", () => {
   const fnMatch = stateUtilsSource.match(/function withKickedFromRoom[\s\S]*?^}/m)
   assert.ok(fnMatch, 'withKickedFromRoom function must exist in state-utils.ts')
   assert.ok(
@@ -44,9 +43,9 @@ test("T9.1-04: withKickedFromRoom sets roomIdInput to ''", () => {
   )
 })
 
-// ---- T9.3-03: clearSessionFields shared by withRoomEnded and resetToLobby ----
+// ---- clearSessionFields shared by withRoomEnded and resetToLobby ----
 
-test('T9.3-03: clearSessionFields helper exists and is used by withRoomEnded', () => {
+test('clearSessionFields helper exists and is used by withRoomEnded', () => {
   assert.ok(
     stateUtilsSource.includes('function clearSessionFields'),
     'clearSessionFields helper function must be defined in state-utils.ts',
@@ -59,7 +58,7 @@ test('T9.3-03: clearSessionFields helper exists and is used by withRoomEnded', (
   )
 })
 
-test('T9.3-03: clearSessionFields is used by resetToLobby', () => {
+test('clearSessionFields is used by resetToLobby', () => {
   const resetToLobbyMatch = stateUtilsSource.match(/function resetToLobby[\s\S]*?^}/m)
   assert.ok(resetToLobbyMatch, 'resetToLobby must exist')
   assert.ok(
@@ -68,13 +67,13 @@ test('T9.3-03: clearSessionFields is used by resetToLobby', () => {
   )
 })
 
-test('T9.3-03: clearSessionFields zeroes participantId', () => {
+test('clearSessionFields zeroes participantId', () => {
   const fnMatch = stateUtilsSource.match(/function clearSessionFields[\s\S]*?^}/m)
   assert.ok(fnMatch, 'clearSessionFields must exist')
   assert.ok(fnMatch[0].includes('participantId: null'), 'clearSessionFields must zero participantId')
 })
 
-test('T9.3-03: clearSessionFields zeroes soloDeadlineAt', () => {
+test('clearSessionFields zeroes soloDeadlineAt', () => {
   const fnMatch = stateUtilsSource.match(/function clearSessionFields[\s\S]*?^}/m)
   assert.ok(fnMatch, 'clearSessionFields must exist')
   assert.ok(
@@ -83,7 +82,7 @@ test('T9.3-03: clearSessionFields zeroes soloDeadlineAt', () => {
   )
 })
 
-test('T9.3-03: clearSessionFields zeroes participantNicknames', () => {
+test('clearSessionFields zeroes participantNicknames', () => {
   const fnMatch = stateUtilsSource.match(/function clearSessionFields[\s\S]*?^}/m)
   assert.ok(fnMatch, 'clearSessionFields must exist')
   assert.ok(
@@ -92,7 +91,7 @@ test('T9.3-03: clearSessionFields zeroes participantNicknames', () => {
   )
 })
 
-test('T9.3-03: clearSessionFields zeroes chatMessages', () => {
+test('clearSessionFields zeroes chatMessages', () => {
   const fnMatch = stateUtilsSource.match(/function clearSessionFields[\s\S]*?^}/m)
   assert.ok(fnMatch, 'clearSessionFields must exist')
   assert.ok(
@@ -101,9 +100,9 @@ test('T9.3-03: clearSessionFields zeroes chatMessages', () => {
   )
 })
 
-// ---- T9.3-05: getErrorMessage maps the three new error codes ----
+// ---- getErrorMessage maps canonical error codes ----
 
-test('T9.3-05: getErrorMessage maps NOT_AUTHORIZED to a non-empty string', () => {
+test('getErrorMessage maps NOT_AUTHORIZED to a non-empty string', () => {
   assert.ok(
     errorCopySource.includes('NOT_AUTHORIZED'),
     'error-copy.ts must reference NOT_AUTHORIZED error code',
@@ -114,19 +113,18 @@ test('T9.3-05: getErrorMessage maps NOT_AUTHORIZED to a non-empty string', () =>
   )
 })
 
-test('T9.3-05: getErrorMessage maps RECONNECT_TOKEN_STALE to a non-empty string', () => {
+test('getErrorMessage maps RECONNECT_TOKEN_STALE to a non-empty string', () => {
   assert.ok(
     errorCopySource.includes('RECONNECT_TOKEN_STALE'),
     'error-copy.ts must reference RECONNECT_TOKEN_STALE error code',
   )
-  // Verify a non-empty user-facing message exists for this code
   assert.ok(
     errorCopySource.includes('reconnect token') || errorCopySource.includes('rejoin'),
     'error message for RECONNECT_TOKEN_STALE must reference reconnect token or rejoin',
   )
 })
 
-test('T9.3-05: getErrorMessage maps HOST_RECONNECT_WINDOW_EXPIRED to a non-empty string', () => {
+test('getErrorMessage maps HOST_RECONNECT_WINDOW_EXPIRED to a non-empty string', () => {
   assert.ok(
     errorCopySource.includes('HOST_RECONNECT_WINDOW_EXPIRED'),
     'error-copy.ts must reference HOST_RECONNECT_WINDOW_EXPIRED error code',
@@ -137,7 +135,7 @@ test('T9.3-05: getErrorMessage maps HOST_RECONNECT_WINDOW_EXPIRED to a non-empty
   )
 })
 
-test('T9.3-05: all 9 canonical error codes are handled in getErrorMessage', () => {
+test('all 9 canonical error codes are handled in getErrorMessage', () => {
   const canonicalCodes = [
     'ROOM_NOT_FOUND',
     'ROOM_FULL',
@@ -157,9 +155,9 @@ test('T9.3-05: all 9 canonical error codes are handled in getErrorMessage', () =
   }
 })
 
-// ---- T9.3-06: falsy-zero guards replaced with explicit null/undefined checks ----
+// ---- Explicit null/undefined guards (not falsy) ----
 
-test('T9.3-06: getSoloWaitingText uses explicit null/undefined guard (not falsy !)', () => {
+test('getSoloWaitingText uses explicit null/undefined guard (not falsy !)', () => {
   const fnMatch = useVaporRoomSource.match(/function getSoloWaitingText[\s\S]*?^}/m)
   assert.ok(fnMatch, 'getSoloWaitingText must be defined in useVaporRoom.ts')
   assert.ok(
@@ -172,7 +170,7 @@ test('T9.3-06: getSoloWaitingText uses explicit null/undefined guard (not falsy 
   )
 })
 
-test('T9.3-06: getLifetimeText uses explicit null/undefined guard (not falsy !)', () => {
+test('getLifetimeText uses explicit null/undefined guard (not falsy !)', () => {
   const fnMatch = useVaporRoomSource.match(/function getLifetimeText[\s\S]*?^}/m)
   assert.ok(fnMatch, 'getLifetimeText must be defined in useVaporRoom.ts')
   assert.ok(
@@ -185,14 +183,14 @@ test('T9.3-06: getLifetimeText uses explicit null/undefined guard (not falsy !)'
   )
 })
 
-test('T9.3-06: getSoloWaitingText is exported from useVaporRoom.ts', () => {
+test('getSoloWaitingText is exported from useVaporRoom.ts', () => {
   assert.ok(
     useVaporRoomSource.includes('export function getSoloWaitingText'),
     'getSoloWaitingText must be exported so it can be exercised independently in tests',
   )
 })
 
-test('T9.3-06: getLifetimeText is exported from useVaporRoom.ts', () => {
+test('getLifetimeText is exported from useVaporRoom.ts', () => {
   assert.ok(
     useVaporRoomSource.includes('export function getLifetimeText'),
     'getLifetimeText must be exported so it can be exercised independently in tests',

@@ -101,7 +101,7 @@ function App() {
     <main className={cn(
       'relative overflow-hidden',
       state.screen === 'room' && mode === 'desktop'
-        ? 'flex flex-col min-h-dvh px-6 py-4'
+        ? 'flex flex-col h-dvh px-6 py-4'
         : state.screen === 'room'
         ? 'flex min-h-dvh items-start justify-center px-4 pt-16 pb-4'
         : 'flex min-h-dvh items-center justify-center px-4 py-6',

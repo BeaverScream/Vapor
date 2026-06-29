@@ -2,6 +2,7 @@
 node_modules/
 frontend/node_modules/
 backend/node_modules/
+shared/node_modules/
 
 # Build outputs
 dist/
@@ -39,10 +40,21 @@ backend/data/
 # MCP config (may contain API keys)
 .mcp.json
 
+# Test artifacts
+test-results/
+playwright-report/
+docs/test_results/artifacts/
+
+# From docs/
+docs/README.md
+docs/Security_Review.md
+docs/system_design/INDEX.md
+docs/archive
+docs/.obsidian
+docs/UI_design/reference
+
 # Others
 .github/
-docs
-Todo.md
 Reference/
 .geminiignore
 CLAUDE.md

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" fill="none">
+  <defs>
+    <radialGradient id="bgA" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(280 180) rotate(30) scale(540 360)">
+      <stop stop-color="#7AA5FF" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#070D18" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bgB" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(940 210) rotate(20) scale(480 320)">
+      <stop stop-color="#91D6FF" stop-opacity="0.26"/>
+      <stop offset="1" stop-color="#070D18" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bgC" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(620 620) rotate(-12) scale(560 340)">
+      <stop stop-color="#C8AFFF" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#070D18" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#253550" stop-opacity="0.76"/>
+      <stop offset="1" stop-color="#1B283E" stop-opacity="0.72"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="760" fill="#070D18"/>
+  <rect width="1200" height="760" fill="url(#bgA)"/>
+  <rect width="1200" height="760" fill="url(#bgB)"/>
+  <rect width="1200" height="760" fill="url(#bgC)"/>
+
+  <rect x="520" y="30" width="160" height="40" rx="20" fill="#141E31" stroke="#435979" stroke-opacity="0.55"/>
+  <text x="600" y="55" text-anchor="middle" fill="#C7D3E8" font-size="16" font-family="Inter, Arial, sans-serif" letter-spacing="6">VAPOR</text>
+
+  <rect x="380" y="180" width="440" height="380" rx="24" fill="url(#card)" stroke="#6E86A8" stroke-opacity="0.38"/>
+  <rect x="416" y="224" width="368" height="44" rx="12" fill="#121B2A" stroke="#4F6788" stroke-opacity="0.42"/>
+  <rect x="420" y="228" width="178" height="36" rx="10" fill="#5A78A8"/>
+  <text x="508" y="251" text-anchor="middle" fill="#F1F5FF" font-size="14" font-family="Inter, Arial, sans-serif">Create room</text>
+  <text x="690" y="251" text-anchor="middle" fill="#95A8C4" font-size="14" font-family="Inter, Arial, sans-serif">Join room</text>
+
+  <rect x="416" y="292" width="368" height="48" rx="12" fill="#121B2A" stroke="#405A80" stroke-opacity="0.48"/>
+  <text x="438" y="322" fill="#879AB8" font-size="13" font-family="Inter, Arial, sans-serif">Password</text>
+
+  <rect x="416" y="356" width="368" height="48" rx="12" fill="#121B2A" stroke="#405A80" stroke-opacity="0.48"/>
+  <text x="438" y="386" fill="#879AB8" font-size="13" font-family="Inter, Arial, sans-serif">Optional</text>
+
+  <rect x="416" y="438" width="368" height="52" rx="14" fill="#6F8FC3"/>
+  <text x="600" y="470" text-anchor="middle" fill="#F7FAFF" font-size="16" font-family="Inter, Arial, sans-serif">Create room</text>
+
+  <text x="600" y="710" text-anchor="middle" fill="#9AAECC" font-size="13" font-family="Inter, Arial, sans-serif">Concept A · Mist Pulse</text>
+</svg>

@@ -438,7 +438,6 @@ const SoloWaitingChip = memo(function SoloWaitingChip({ soloDeadlineAt }: { solo
 
 const RoomLifetimeChip = memo(function RoomLifetimeChip({ expiresAt }: { expiresAt: number | null }) {
   const [nowMs, setNowMs] = useState(() => Date.now())
-  const [isInputFocused, setIsInputFocused] = useState(false)
 
   useEffect(() => {
     if (!expiresAt) return
@@ -446,24 +445,7 @@ const RoomLifetimeChip = memo(function RoomLifetimeChip({ expiresAt }: { expires
     return () => window.clearInterval(id)
   }, [expiresAt])
 
-  useEffect(() => {
-    const onFocusIn = (event: FocusEvent) => {
-      const target = event.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') setIsInputFocused(true)
-    }
-    const onFocusOut = (event: FocusEvent) => {
-      const target = event.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') setIsInputFocused(false)
-    }
-    document.addEventListener('focusin', onFocusIn)
-    document.addEventListener('focusout', onFocusOut)
-    return () => {
-      document.removeEventListener('focusin', onFocusIn)
-      document.removeEventListener('focusout', onFocusOut)
-    }
-  }, [])
-
-  if (!expiresAt || isInputFocused) return null
+  if (!expiresAt) return null
 
   const text = getLifetimeText(expiresAt, nowMs)
   if (!text) return null

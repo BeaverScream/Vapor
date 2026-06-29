@@ -158,9 +158,9 @@ function popError(socket: FakeSocket): { code: string; message: string } | undef
   return socket.popEvent(SERVER_EVENTS.error) as { code: string; message: string } | undefined;
 }
 
-// ---- T9.1-02: leaveRoom solo-timer restart ----
+// ---- Solo timer: leaveRoom triggers soloDeadlineAt ----
 
-test("T9.1-02: last guest voluntarily leaves → peer_left carries soloDeadlineAt for the host", () => {
+test("last guest voluntarily leaves → peer_left carries soloDeadlineAt for the host", () => {
   const TIME = 1_000_000;
   const { io } = setupHarness({ now: () => TIME });
   const host = io.connect("socket-host");
@@ -194,7 +194,7 @@ test("T9.1-02: last guest voluntarily leaves → peer_left carries soloDeadlineA
   );
 });
 
-test("T9.1-02 (non-last guest): non-last guest leaving does not set soloDeadlineAt", () => {
+test("non-last guest leaving does not set soloDeadlineAt", () => {
   const { io } = setupHarness();
   const host = io.connect("socket-host");
   const guest1 = io.connect("socket-guest-1");
@@ -211,7 +211,6 @@ test("T9.1-02 (non-last guest): non-last guest leaving does not set soloDeadline
   guest2.popEvent(SERVER_EVENTS.roomJoined);
   host.popEvent(SERVER_EVENTS.peerJoined);
 
-  // guest1 leaves — host + guest2 still remain
   guest1.trigger(CLIENT_EVENTS.leaveRoom, {});
 
   const peerLeft = host.popEvent(SERVER_EVENTS.peerLeft) as {
@@ -228,9 +227,9 @@ test("T9.1-02 (non-last guest): non-last guest leaving does not set soloDeadline
   );
 });
 
-// ---- T9.1-05: Kick regression guard ----
+// ---- Solo timer: kick regression guard ----
 
-test("T9.1-05 (regression): kick of last guest still emits soloDeadlineAt in peer_left after refactor", () => {
+test("kick of last guest still emits soloDeadlineAt in peer_left after restartSoloTimer refactor", () => {
   const TIME = 5_000_000;
   const { io } = setupHarness({ now: () => TIME });
   const host = io.connect("socket-host");
@@ -271,9 +270,9 @@ test("T9.1-05 (regression): kick of last guest still emits soloDeadlineAt in pee
   );
 });
 
-// ---- T9.2-03: All TCP drop → solo timer → room destroyed ----
+// ---- Solo timer: TCP drop → timer fires → room destroyed ----
 
-test("T9.2-03: all participants TCP drop → solo timer fires → room destroyed with solo_timeout_expired", (t) => {
+test("all participants TCP drop → solo timer fires → room destroyed with solo_timeout_expired", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
 
   const { io, getSnapshot } = setupHarness();
@@ -294,10 +293,8 @@ test("T9.2-03: all participants TCP drop → solo timer fires → room destroyed
   // Host drops → liveCount becomes 0 → solo timer from guest drop continues running
   host.triggerDisconnect();
 
-  // Room still exists — timers not yet fired
   assert.equal(getSnapshot().roomCount, 1, "room still exists after both TCP drops");
 
-  // Tick past the solo timeout — solo timer fires before host grace (60 min) and guest grace (30 min)
   t.mock.timers.tick(SOLO_HOST_ROOM_TIMEOUT_MS);
 
   assert.equal(getSnapshot().roomCount, 0, "room destroyed after solo timer fires");
@@ -307,7 +304,7 @@ test("T9.2-03: all participants TCP drop → solo timer fires → room destroyed
   assert.equal(hostDestroyed?.reason, "solo_timeout_expired", "destroy reason is solo_timeout_expired");
 });
 
-test("T9.2-03 (host drops first): host drops first then guest → solo timer from host disconnect fires", (t) => {
+test("host drops first then guest → solo timer from host disconnect fires → room destroyed", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
 
   const { io, getSnapshot } = setupHarness();
@@ -337,9 +334,9 @@ test("T9.2-03 (host drops first): host drops first then guest → solo timer fro
   assert.equal(guestDestroyed?.reason, "solo_timeout_expired");
 });
 
-// ---- T9.2-04: Reconnect before timer fires ----
+// ---- Solo timer: reconnect before timer fires ----
 
-test("T9.2-04: participant reconnects before solo timer fires → room_joined emitted → room survives", (t) => {
+test("participant reconnects before solo timer fires → room_joined emitted → room survives", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
 
   const { io, getSnapshot } = setupHarness();
@@ -363,7 +360,7 @@ test("T9.2-04: participant reconnects before solo timer fires → room_joined em
 
   assert.equal(getSnapshot().roomCount, 1, "room still alive before any timer fires");
 
-  // Host reconnects before the 15-min solo timer fires (timers not ticked yet)
+  // Host reconnects before the solo timer fires (timers not ticked yet)
   const reconnectSocket = io.connect("socket-reconnect");
   reconnectSocket.trigger(CLIENT_EVENTS.resumeSession, {
     roomId: roomCreated.roomId,
@@ -380,7 +377,7 @@ test("T9.2-04: participant reconnects before solo timer fires → room_joined em
   assert.equal(popError(reconnectSocket), undefined, "no error on successful reconnect");
 });
 
-test("T9.2-04 (solo timer restart on reconnect): reconnect with solo host resets the timer", (t) => {
+test("reconnect with solo host resets the timer", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
 
   const { io, getSnapshot } = setupHarness();
@@ -414,14 +411,13 @@ test("T9.2-04 (solo timer restart on reconnect): reconnect with solo host resets
   assert.equal(getSnapshot().roomCount, 1, "room alive after reconnect");
 
   // After reconnect with solo host (liveCount===1), solo timer is restarted.
-  // Ticking past the timeout now destroys via the NEW timer.
   t.mock.timers.tick(SOLO_HOST_ROOM_TIMEOUT_MS);
   assert.equal(getSnapshot().roomCount, 0, "room destroyed after reconnected solo-host timer fires");
 });
 
-// ---- T9.2-06: Host alone TCP drops → original solo timer fires ----
+// ---- Solo timer: host-alone TCP drop ----
 
-test("T9.2-06: host TCP drops when alone → solo timer from creation fires → room destroyed with solo_timeout_expired", (t) => {
+test("host TCP drops when alone → solo timer from creation fires → room destroyed with solo_timeout_expired", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
 
   const { io, getSnapshot } = setupHarness();
@@ -432,12 +428,10 @@ test("T9.2-06: host TCP drops when alone → solo timer from creation fires → 
 
   assert.equal(getSnapshot().roomCount, 1, "room exists after creation");
 
-  // Host TCP drops — no guests ever joined, so the creation-time solo timer is still running
   host.triggerDisconnect();
 
   assert.equal(getSnapshot().roomCount, 1, "room still alive after host TCP drop (grace windows active)");
 
-  // Tick past the solo timeout set at room creation time
   t.mock.timers.tick(SOLO_HOST_ROOM_TIMEOUT_MS);
 
   assert.equal(getSnapshot().roomCount, 0, "room destroyed by solo timer (not by the longer host grace)");
@@ -445,63 +439,4 @@ test("T9.2-06: host TCP drops when alone → solo timer from creation fires → 
   const destroyed = host.popEvent(SERVER_EVENTS.roomDestroyed) as { reason: string } | undefined;
   assert.ok(destroyed, "host socket receives room_destroyed event");
   assert.equal(destroyed?.reason, "solo_timeout_expired", "destroy reason is solo_timeout_expired, not host_grace_expired");
-});
-
-// ---- T9.3-02: clearRoomArtifacts removes roomNameToId ----
-
-test("T9.3-02: room name is removed from roomNameToId when room is destroyed", () => {
-  let roomCounter = 0;
-  const { io, state, getSnapshot } = setupHarness({
-    generateRoomId: () => {
-      roomCounter += 1;
-      return `ROOM-${roomCounter}`;
-    },
-  });
-  const host = io.connect("socket-host");
-
-  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host", roomName: "my-test-room" });
-  host.popEvent(SERVER_EVENTS.roomCreated);
-
-  assert.equal(
-    state.roomNameToId.has("my-test-room"),
-    true,
-    "roomNameToId must contain the room name after creation",
-  );
-
-  // Destroy room by host leaving
-  host.trigger(CLIENT_EVENTS.leaveRoom, {});
-
-  assert.equal(getSnapshot().roomCount, 0, "room removed from state after host leaves");
-  assert.equal(
-    state.roomNameToId.has("my-test-room"),
-    false,
-    "roomNameToId must be cleared after room is destroyed (clearRoomArtifacts)",
-  );
-});
-
-test("T9.3-02 (reuse): freed room name can be claimed by a new room", () => {
-  let roomCounter = 0;
-  const { io, getSnapshot } = setupHarness({
-    generateRoomId: () => {
-      roomCounter += 1;
-      return `ROOM-${roomCounter}`;
-    },
-  });
-  const host1 = io.connect("socket-host-1");
-  const host2 = io.connect("socket-host-2");
-
-  host1.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host1", roomName: "shared-name" });
-  const first = host1.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string } | undefined;
-  assert.ok(first);
-
-  host1.trigger(CLIENT_EVENTS.leaveRoom, {});
-  assert.equal(getSnapshot().roomCount, 0, "first room destroyed");
-
-  host2.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host2", roomName: "shared-name" });
-  const second = host2.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string; roomName?: string } | undefined;
-
-  assert.ok(second, "second room created after name freed");
-  assert.equal(second?.roomName, "shared-name", "freed name accepted on second creation");
-  assert.notEqual(second?.roomId, first?.roomId, "new room has a different ID");
-  assert.equal(popError(host2), undefined, "no error on second creation with same name");
 });

@@ -128,6 +128,11 @@ export function registerSocketHandlers({
 }: RegisterSocketHandlersArgs): NodeJS.Timeout {
   const authCtx = passwordAuth.createPasswordAuthContext();
   const rateLimitCtx = providedRateLimitCtx ?? rateLimiting.createRateLimitingContext();
+  // Test-only escape hatch: the E2E harness drives many room creates from a single
+  // subject (shared IP/UA, no fingerprint), which legitimately trips the create-burst
+  // and per-IP thresholds. Set E2E_DISABLE_RATE_LIMIT=1 (Playwright webServer only) to
+  // bypass the gates. Never set in production — the flag is unset by default.
+  const rateLimitingDisabled = process.env.E2E_DISABLE_RATE_LIMIT === "1";
   const reconnectCtx = reconnect.createReconnectContext();
   const graceCtx = grace.createGraceWindowContext();
   const roomLockChains = new Map<string, Promise<void>>();
@@ -258,6 +263,25 @@ export function registerSocketHandlers({
     );
   };
 
+  // Shared host/guest disconnect emission: compute the live count, restart the
+  // solo timer if the room dropped to one occupant, and broadcast peer_left.
+  // Both disconnect branches must stay identical, so they route through here.
+  const emitPeerLeftOnDisconnect = (
+    socket: Socket,
+    roomId: string,
+    room: { participants: Map<string, { socketId: string }> },
+    participantId: string,
+  ): void => {
+    const liveCount = getLiveParticipantCount(room);
+    const soloDeadlineAt = restartSoloTimerIfSolo(roomId, liveCount);
+    socket.to(roomId).emit(signaling.SERVER_EVENTS.peerLeft, {
+      participantId,
+      reason: "disconnect",
+      participantCount: liveCount,
+      ...(soloDeadlineAt !== null ? { soloDeadlineAt } : {}),
+    } as PeerLeftPayload);
+  };
+
   const handleGuestGraceExpired = (participantId: string, roomId: string): void => {
     const activeRoom = state.rooms.get(roomId);
     if (!activeRoom) {
@@ -293,11 +317,10 @@ export function registerSocketHandlers({
       state.rooms.delete(roomId);
       return;
     }
-    io.to(roomId).emit(signaling.SERVER_EVENTS.peerLeft, {
-      participantId,
-      reason: "disconnect",
-      participantCount,
-    } as PeerLeftPayload);
+    // The guest's departure was already announced via peer_left at disconnect
+    // (VP-10.1). Grace expiry is now purely server-side Map/nickname cleanup;
+    // re-emitting here would duplicate the system message and recompute the
+    // count from participants.size (which still includes other guests in grace).
   };
 
   io.on("connection", (socket) => {
@@ -347,7 +370,7 @@ export function registerSocketHandlers({
         const ip = rateLimiting.deriveIp(socket);
         const createdAt = now();
 
-        if (rateLimiting.checkAndRecordCreateAttempt(rateLimitCtx, subject, ip, createdAt)) {
+        if (!rateLimitingDisabled && rateLimiting.checkAndRecordCreateAttempt(rateLimitCtx, subject, ip, createdAt)) {
           emitRateLimited(socket);
           return;
         }
@@ -436,13 +459,16 @@ export function registerSocketHandlers({
         const subject = rateLimiting.deriveJoinAttemptSubject(socket);
         const attemptTimestamp = now();
 
-        if (rateLimiting.getJoinAttemptStatus(rateLimitCtx, roomId, subject, attemptTimestamp) === "rate_limited") {
+        if (
+          !rateLimitingDisabled &&
+          rateLimiting.getJoinAttemptStatus(rateLimitCtx, roomId, subject, attemptTimestamp) === "rate_limited"
+        ) {
           emitRateLimited(socket);
           return;
         }
 
         const ip = rateLimiting.deriveIp(socket);
-        if (rateLimiting.checkAndRecordJoinIp(rateLimitCtx, ip, attemptTimestamp)) {
+        if (!rateLimitingDisabled && rateLimiting.checkAndRecordJoinIp(rateLimitCtx, ip, attemptTimestamp)) {
           emitRateLimited(socket);
           return;
         }
@@ -966,14 +992,7 @@ export function registerSocketHandlers({
           );
           if (deadlineAt !== null) {
             reconnect.markReconnectDisconnected(reconnectCtx, participantId, deadlineAt);
-            const liveCount = getLiveParticipantCount(room);
-            const hostSoloDeadlineAt = restartSoloTimerIfSolo(roomId, liveCount);
-            socket.to(roomId).emit(signaling.SERVER_EVENTS.peerLeft, {
-              participantId,
-              reason: "disconnect",
-              participantCount: liveCount,
-              ...(hostSoloDeadlineAt !== null ? { soloDeadlineAt: hostSoloDeadlineAt } : {}),
-            } as PeerLeftPayload);
+            emitPeerLeftOnDisconnect(socket, roomId, room, participantId);
             socket.to(roomId).emit(signaling.SERVER_EVENTS.hostReconnectGrace, { deadlineAt } as HostReconnectGracePayload);
           }
           metrics.recordDisconnect(socket.id);
@@ -994,10 +1013,11 @@ export function registerSocketHandlers({
             reconnect.markReconnectDisconnected(reconnectCtx, participantId, deadlineAt);
           }
 
-          // Guest stays visible until guest-grace expires (see T1.6-01): no peer_left is
-          // emitted here. The solo timer still restarts so the now host-solo room is bounded.
-          const liveCount = getLiveParticipantCount(room);
-          restartSoloTimerIfSolo(roomId, liveCount);
+          // peer_left is broadcast so connected clients immediately remove the guest from
+          // their UI roster. The backend room.participants Map retains a disconnected: sentinel
+          // for the grace window (reconnection eligibility + nickname hold) — these are two
+          // distinct structures serving two distinct purposes. See System Design §6.0.
+          emitPeerLeftOnDisconnect(socket, roomId, room, participantId);
         }
 
         metrics.recordDisconnect(socket.id);

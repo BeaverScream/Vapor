@@ -11,9 +11,9 @@ import {
 const SOLO_TIMEOUT_MS = 15 * 60 * 1000;
 const TTL_MS = 60 * 60 * 1000;
 
-// ---- T9.2-02: restartSoloTimer helper correctness ----
+// ---- restartSoloTimer helper correctness ----
 
-test("T9.2-02: restartSoloTimer sets policy.soloDeadlineAt to nowFn() + soloTimeoutMs", (t) => {
+test("restartSoloTimer sets policy.soloDeadlineAt to nowFn() + soloTimeoutMs", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
 
   const ctx = createGraceWindowContext();
@@ -46,7 +46,7 @@ test("T9.2-02: restartSoloTimer sets policy.soloDeadlineAt to nowFn() + soloTime
   assert.equal(policy.soloDeadlineAt, nowTs + SOLO_TIMEOUT_MS, "policy.soloDeadlineAt updated");
 });
 
-test("T9.2-02: restartSoloTimer replaces the previous timer handle", (t) => {
+test("restartSoloTimer replaces the previous timer handle", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
 
   const ctx = createGraceWindowContext();
@@ -76,7 +76,7 @@ test("T9.2-02: restartSoloTimer replaces the previous timer handle", (t) => {
   );
 });
 
-test("T9.2-02: restartSoloTimer fires the new callback after tick; old callback is suppressed", (t) => {
+test("restartSoloTimer fires the new callback after tick; old callback is suppressed", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
 
   const ctx = createGraceWindowContext();

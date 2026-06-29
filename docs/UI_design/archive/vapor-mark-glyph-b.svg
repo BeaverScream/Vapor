@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none" role="img" aria-labelledby="titleB descB">
+  <title id="titleB">Vapor Mark B - Bridge Portal</title>
+  <desc id="descB">Portal ring with secure bridge corridor and evaporating trail.</desc>
+  <defs>
+    <linearGradient id="bgB" x1="64" y1="64" x2="448" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#121825"/>
+      <stop offset="1" stop-color="#090C14"/>
+    </linearGradient>
+    <linearGradient id="ringB" x1="96" y1="256" x2="416" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C9F3FF"/>
+      <stop offset="0.55" stop-color="#7CDEFF"/>
+      <stop offset="1" stop-color="#55CFEF"/>
+    </linearGradient>
+    <linearGradient id="corridorB" x1="182" y1="346" x2="330" y2="184" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DDF7FF" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#8BE1FF" stop-opacity="0.45"/>
+    </linearGradient>
+    <filter id="glowB" x="70" y="70" width="372" height="372" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="128" fill="url(#bgB)"/>
+
+  <g filter="url(#glowB)">
+    <circle cx="256" cy="256" r="146" stroke="url(#ringB)" stroke-width="30"/>
+  </g>
+  <circle cx="256" cy="256" r="146" stroke="url(#ringB)" stroke-width="18"/>
+
+  <path d="M184 338L256 192L328 338" stroke="url(#corridorB)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M214 278C244 260 270 260 298 278" stroke="#BDEEFF" stroke-opacity="0.7" stroke-width="12" stroke-linecap="round"/>
+
+  <circle cx="330" cy="180" r="4" fill="#CFF5FF" fill-opacity="0.8"/>
+  <circle cx="350" cy="164" r="3" fill="#CFF5FF" fill-opacity="0.5"/>
+  <circle cx="372" cy="152" r="2.5" fill="#CFF5FF" fill-opacity="0.35"/>
+</svg>

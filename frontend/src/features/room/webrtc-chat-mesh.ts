@@ -79,7 +79,7 @@ export class VaporWebRtcChatMesh {
 
     for (const peerId of peerSet) {
       this.ensurePeerConnection(peerId)
-      if (this.shouldInitiate(peerId)) {
+      if (this.shouldInitiate(peerId) && this.needsOffer(peerId)) {
         void this.startOffer(peerId)
       }
     }
@@ -91,6 +91,23 @@ export class VaporWebRtcChatMesh {
     }
 
     this.emitConnectedPeerCount()
+  }
+
+  // True when this peer has no usable channel and is safe to (re)offer to. Lets
+  // syncPeers double as a mesh-repair pass on topology changes (e.g. host departure)
+  // without disrupting a healthy or mid-negotiation connection.
+  private needsOffer(peerId: string): boolean {
+    const channel = this.dataChannels.get(peerId)
+    // An open channel is healthy and a still-connecting one is mid-establishment —
+    // either way a fresh offer would be unnecessary churn, so skip it (CR10-3).
+    if (channel && (channel.readyState === 'open' || channel.readyState === 'connecting')) {
+      return false
+    }
+    const connection = this.peerConnections.get(peerId)
+    if (connection && connection.signalingState !== 'stable') {
+      return false
+    }
+    return true
   }
 
   handlePeerJoined(peerId: string): void {

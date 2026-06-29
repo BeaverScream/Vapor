@@ -684,83 +684,15 @@ test("T2.6-02: malformed signaling payloads are rejected with INVALID_SIGNAL_PAY
 });
 
 // ---- Lifecycle ----
-test("T1.6-01: guest disconnect starts grace and removes guest only after guest-grace timeout", () => {
-  const originalSetTimeout = globalThis.setTimeout;
-  const originalClearTimeout = globalThis.clearTimeout;
-
-  const scheduledTimeouts: Array<{
-    handle: { cleared: boolean; unref?: () => void };
-    delay: number;
-    callback: () => void;
-  }> = [];
-
-  globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number) => {
-    const handle: { cleared: boolean; unref?: () => void } = {
-      cleared: false,
-      unref: () => undefined
-    };
-
-    scheduledTimeouts.push({
-      handle,
-      delay: Number(delay ?? 0),
-      callback: () => callback()
-    });
-
-    return handle as unknown as ReturnType<typeof setTimeout>;
-  }) as typeof setTimeout;
-
-  globalThis.clearTimeout = ((handle: ReturnType<typeof setTimeout>) => {
-    const timeoutHandle = handle as unknown as { cleared?: boolean };
-    if (timeoutHandle) {
-      timeoutHandle.cleared = true;
-    }
-  }) as typeof clearTimeout;
-
-  try {
-    const { io, hooks } = setupSocketHarness();
-    const host = io.connect("socket-host");
-    const guest = io.connect("socket-guest");
-
-    host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
-    host.popEvent(SERVER_EVENTS.roomCreated);
-
-    guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: "AbC123", password: "pw", nickname: "Guest" });
-    guest.popEvent(SERVER_EVENTS.roomJoined);
-    host.popEvent(SERVER_EVENTS.peerJoined);
-
-    guest.triggerDisconnect();
-
-    const immediatePeerLeft = host.popEvent(SERVER_EVENTS.peerLeft);
-    assert.equal(immediatePeerLeft, undefined, "Guest should remain during grace window");
-
-    const snapshotDuringGrace = hooks.getStateSnapshot();
-    assert.equal(snapshotDuringGrace.roomCount, 1);
-    assert.equal(snapshotDuringGrace.rooms[0]?.participantCount, 2);
-
-    const guestGraceTimer = scheduledTimeouts.find(
-      (entry) => entry.delay === GUEST_DISCONNECT_GRACE_MS && !entry.handle.cleared
-    );
-    assert.ok(guestGraceTimer, "Expected guest grace timeout to be scheduled");
-    guestGraceTimer?.callback();
-
-    const peerLeft = host.popEvent(SERVER_EVENTS.peerLeft) as {
-      participantId: string;
-      reason: string;
-      participantCount: number;
-    };
-
-    assert.ok(peerLeft);
-    assert.equal(peerLeft.reason, "disconnect");
-    assert.equal(peerLeft.participantCount, 1);
-
-    const snapshotAfterGrace = hooks.getStateSnapshot();
-    assert.equal(snapshotAfterGrace.roomCount, 1);
-    assert.equal(snapshotAfterGrace.rooms[0]?.participantCount, 1);
-  } finally {
-    globalThis.setTimeout = originalSetTimeout;
-    globalThis.clearTimeout = originalClearTimeout;
-  }
-});
+// OBSOLETE (removed Phase 10, VP-10.1 / BL-SIG-GUEST-DISCONNECT-01):
+// "T1.6-01: guest disconnect starts grace and removes guest only after
+// guest-grace timeout" asserted that NO peer_left is emitted on a guest TCP
+// drop (guest "stays visible" until the grace window expires). VP-10.1
+// inverted this to match System Design §6.0: a disconnecting guest is
+// immediately removed from the participants list and peer_left (reason
+// "disconnect") is broadcast to the remaining participants, while the 30-min
+// grace window governs reconnection eligibility only — not visibility.
+// The new behavior is covered by T10.1-01/02/03 in phase10.integration.test.ts.
 
 test("T1.6-02: host disconnect enters grace flow and does not destroy room immediately", () => {
   const { io, hooks } = setupSocketHarness();

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="600" y1="0" x2="600" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0D162A"/>
+      <stop offset="1" stop-color="#070D18"/>
+    </linearGradient>
+    <linearGradient id="trail" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#98B7FF" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#98B7FF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="760" fill="url(#bg)"/>
+
+  <g opacity="0.5">
+    <rect x="94" y="30" width="2" height="94" rx="1" fill="url(#trail)"/>
+    <rect x="188" y="8" width="2" height="120" rx="1" fill="url(#trail)"/>
+    <rect x="286" y="40" width="2" height="86" rx="1" fill="url(#trail)"/>
+    <rect x="382" y="14" width="2" height="126" rx="1" fill="url(#trail)"/>
+    <rect x="478" y="36" width="2" height="90" rx="1" fill="url(#trail)"/>
+    <rect x="574" y="4" width="2" height="124" rx="1" fill="url(#trail)"/>
+    <rect x="670" y="28" width="2" height="98" rx="1" fill="url(#trail)"/>
+    <rect x="766" y="12" width="2" height="116" rx="1" fill="url(#trail)"/>
+    <rect x="862" y="34" width="2" height="96" rx="1" fill="url(#trail)"/>
+    <rect x="958" y="16" width="2" height="112" rx="1" fill="url(#trail)"/>
+    <rect x="1054" y="42" width="2" height="84" rx="1" fill="url(#trail)"/>
+  </g>
+
+  <rect x="520" y="30" width="160" height="40" rx="20" fill="#151F33" stroke="#51688A" stroke-opacity="0.58"/>
+  <text x="600" y="55" text-anchor="middle" fill="#CDDAEF" font-size="16" font-family="Inter, Arial, sans-serif" letter-spacing="6">VAPOR</text>
+
+  <rect x="386" y="182" width="428" height="368" rx="24" fill="#1A263A" fill-opacity="0.80" stroke="#6C84A7" stroke-opacity="0.36"/>
+  <rect x="420" y="226" width="360" height="44" rx="12" fill="#121B2A" stroke="#4A648A" stroke-opacity="0.4"/>
+  <rect x="604" y="230" width="172" height="36" rx="10" fill="#5A79A8"/>
+  <text x="508" y="252" text-anchor="middle" fill="#8FA3C2" font-size="14" font-family="Inter, Arial, sans-serif">Create room</text>
+  <text x="690" y="252" text-anchor="middle" fill="#F1F6FF" font-size="14" font-family="Inter, Arial, sans-serif">Join room</text>
+
+  <rect x="420" y="292" width="360" height="48" rx="12" fill="#121B2A" stroke="#3F5B82" stroke-opacity="0.52"/>
+  <text x="442" y="322" fill="#8EA2C1" font-size="13" font-family="Inter, Arial, sans-serif">Room ID</text>
+
+  <rect x="420" y="356" width="360" height="48" rx="12" fill="#121B2A" stroke="#3F5B82" stroke-opacity="0.52"/>
+  <text x="442" y="386" fill="#8EA2C1" font-size="13" font-family="Inter, Arial, sans-serif">Password</text>
+
+  <rect x="420" y="438" width="360" height="52" rx="14" fill="#6F8FC3"/>
+  <text x="600" y="470" text-anchor="middle" fill="#F6FAFF" font-size="16" font-family="Inter, Arial, sans-serif">Join room</text>
+
+  <text x="600" y="710" text-anchor="middle" fill="#9CB0CD" font-size="13" font-family="Inter, Arial, sans-serif">Concept B · Signal Stream</text>
+</svg>

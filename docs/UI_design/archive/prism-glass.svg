@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#101A30"/>
+      <stop offset="1" stop-color="#070D18"/>
+    </linearGradient>
+    <linearGradient id="pane1" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#87B6FF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#87B6FF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="pane2" x1="1" y1="0" x2="0" y2="1">
+      <stop stop-color="#C7A8FF" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#C7A8FF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="760" fill="url(#bg)"/>
+
+  <rect x="120" y="130" width="300" height="200" rx="28" fill="url(#pane1)"/>
+  <rect x="820" y="90" width="250" height="170" rx="24" fill="url(#pane2)"/>
+  <rect x="870" y="450" width="230" height="170" rx="24" fill="url(#pane1)"/>
+
+  <rect x="520" y="30" width="160" height="40" rx="20" fill="#152034" stroke="#4E678A" stroke-opacity="0.6"/>
+  <text x="600" y="55" text-anchor="middle" fill="#CCD9EE" font-size="16" font-family="Inter, Arial, sans-serif" letter-spacing="6">VAPOR</text>
+
+  <rect x="380" y="178" width="440" height="388" rx="24" fill="#1A273D" fill-opacity="0.70" stroke="#90A8CF" stroke-opacity="0.45"/>
+  <rect x="388" y="186" width="424" height="372" rx="20" fill="#111B2D" fill-opacity="0.58"/>
+
+  <rect x="416" y="226" width="368" height="44" rx="12" fill="#111A2A" stroke="#56709A" stroke-opacity="0.45"/>
+  <rect x="420" y="230" width="178" height="36" rx="10" fill="#6786BA"/>
+  <text x="508" y="252" text-anchor="middle" fill="#F0F6FF" font-size="14" font-family="Inter, Arial, sans-serif">Create room</text>
+  <text x="690" y="252" text-anchor="middle" fill="#98ACCA" font-size="14" font-family="Inter, Arial, sans-serif">Join room</text>
+
+  <rect x="416" y="292" width="368" height="48" rx="12" fill="#111A2A" stroke="#4A678F" stroke-opacity="0.48"/>
+  <text x="438" y="322" fill="#8EA3C2" font-size="13" font-family="Inter, Arial, sans-serif">Password</text>
+
+  <rect x="416" y="438" width="368" height="52" rx="14" fill="#6E8EC2"/>
+  <text x="600" y="470" text-anchor="middle" fill="#F5F9FF" font-size="16" font-family="Inter, Arial, sans-serif">Create room</text>
+
+  <text x="600" y="710" text-anchor="middle" fill="#9EB2CE" font-size="13" font-family="Inter, Arial, sans-serif">Concept C · Prism Glass</text>
+</svg>

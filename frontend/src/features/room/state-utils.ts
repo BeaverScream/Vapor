@@ -159,6 +159,11 @@ export function withChatDraft(state: RoomSessionState, chatDraft: string): RoomS
 }
 
 export function withAppendedChatMessage(state: RoomSessionState, message: ChatMessage): RoomSessionState {
+  // Idempotent by messageId: a message already present (e.g. a restored snapshot
+  // entry, or a StrictMode double-invoke) is never appended twice (VP-10.4).
+  if (state.chatMessages.some((existing) => existing.messageId === message.messageId)) {
+    return state
+  }
   return {
     ...state,
     chatMessages: [...state.chatMessages, message],

@@ -57,11 +57,27 @@ import {
 } from './hooks/useSessionPersistence'
 import { useJoinRateLimit } from './hooks/useJoinRateLimit'
 import { useTypingIndicator } from './hooks/useTypingIndicator'
-import { useChatMessaging, createChatMessage } from './hooks/useChatMessaging'
+import {
+  useChatMessaging,
+  createChatMessage,
+  saveChatHistory,
+  loadChatHistory,
+  clearChatHistory,
+} from './hooks/useChatMessaging'
 import { useSocketConnection } from './hooks/useSocketConnection'
 import { useNotifications } from '../../lib/useNotifications'
 
 const COPY_FEEDBACK_MS = 1800
+
+// Diagnostic tracing for WebRTC mesh transitions (VP-10.2). Left in place but
+// dormant by default — flip to `true` to re-enable peer-mesh troubleshooting.
+const DEBUG_PEER_TRACE = false
+function tracePeer(...args: unknown[]): void {
+  if (DEBUG_PEER_TRACE) {
+    // eslint-disable-next-line no-console
+    console.debug('[vapor:peer-trace]', ...args)
+  }
+}
 
 const createDefaultSocketClient = (): RoomSocketClient => createRoomSocketClient()
 const writeDefaultClipboardText = (value: string): Promise<void> =>
@@ -273,7 +289,18 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       })
       resumeInFlightRef.current = false
       autoResumeRequestedRef.current = false
-      setState((previous) => withRoomJoined(previous, payload))
+      // Drop any outbound messages queued before an involuntary drop so a reconnect
+      // does not re-flush stale messages to peers (which would duplicate them on the
+      // receiving side). Read happens once, outside the pure reducer (VP-10.4.4).
+      chat.clearPending()
+      const restoredChat = loadChatHistory(payload.roomId)
+      setState((previous) => {
+        const joined = withRoomJoined(previous, payload)
+        // Restore the local snapshot (involuntary drop ≠ leave). Merge directly into
+        // the join transition so no intermediate empty-chat commit can trigger the
+        // persistence effect and overwrite stored history (VP-10.4.3).
+        return restoredChat.length > 0 ? { ...joined, chatMessages: restoredChat } : joined
+      })
       const peerMesh = createPeerMesh(payload.roomId, payload.participantId)
       peerMesh.syncPeers(payload.peers.map((peer) => peer.participantId))
       const socket = socketRef.current
@@ -305,6 +332,25 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
 
   const onPeerLeft = useCallback((payload: PeerLeftPayload): void => {
     peerMeshRef.current?.handlePeerLeft(payload.participantId)
+    // Revalidate the mesh against the remaining participants so guest-to-guest
+    // data channels survive a peer (e.g. host) departure. Without this, a missing
+    // or stuck guest↔guest connection is never repaired and those guests can no
+    // longer exchange messages once the shared peer leaves (VP-10.2).
+    const previousState = stateRef.current
+    const remainingPeerIds = previousState.participants
+      .map((participant) => participant.participantId)
+      .filter(
+        (participantId) =>
+          participantId !== previousState.participantId && participantId !== payload.participantId,
+      )
+    tracePeer('peer_left', {
+      left: payload.participantId,
+      reason: payload.reason,
+      remainingPeerIds,
+    })
+    if (remainingPeerIds.length > 0) {
+      peerMeshRef.current?.syncPeers(remainingPeerIds)
+    }
     setState((previous) => {
       const name = previous.participantNicknames[payload.participantId] ?? payload.participantId.slice(0, 8)
       const action = payload.reason === 'disconnect' ? 'disconnected' : 'left'
@@ -364,6 +410,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   const onParticipantKicked = useCallback(
     (payload: ParticipantKickedPayload): void => {
       if (payload.participantId === stateRef.current.participantId) {
+        clearChatHistory(stateRef.current.activeRoomId)
         persistence.clearStoredReconnectSession()
         clearRoomSession()
         socketRef.current?.disconnect()
@@ -383,6 +430,9 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
 
   const onRoomDestroyed = useCallback(
     (payload: RoomDestroyedPayload): void => {
+      // Covers host grace expiry / TTL / solo timeout — the room is gone, so every
+      // client clears its own snapshot (VP-10.4.5).
+      clearChatHistory(stateRef.current.activeRoomId)
       persistence.clearStoredReconnectSession()
       clearRoomSession()
       setState((previous) => withRoomEnded(previous, payload.reason))
@@ -398,12 +448,30 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
         autoResumeRequestedRef.current = false
         resumeInFlightRef.current = false
 
+        // Captured before the reconnect session is cleared below — during resume the
+        // room id lives in the stored session, not yet in state.
+        const storedRoomId = persistence.readStoredReconnectSession()?.roomId ?? previous.activeRoomId
+
+        // A failed/stale resume means the user can no longer return to that room
+        // (guest grace expiry, room gone, etc.) — treat as a leave and clear both
+        // the local chat snapshot (VP-10.4.5) and the now-unusable reconnect token
+        // so a later auto-resume cannot retry the dead session (CR10-2).
+        if (
+          errorCode === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND ||
+          errorCode === SIGNALING_ERROR_CODES.INVALID_PASSWORD ||
+          errorCode === SIGNALING_ERROR_CODES.RATE_LIMITED ||
+          errorCode === SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE ||
+          errorCode === SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED
+        ) {
+          clearChatHistory(storedRoomId)
+          persistence.clearStoredReconnectSession()
+        }
+
         if (
           errorCode === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND ||
           errorCode === SIGNALING_ERROR_CODES.INVALID_PASSWORD ||
           errorCode === SIGNALING_ERROR_CODES.RATE_LIMITED
         ) {
-          persistence.clearStoredReconnectSession()
           return resetToLobby(previous)
         }
       }
@@ -464,6 +532,15 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       window.clearTimeout(timeoutHandle)
     }
   }, [state.copyFeedback])
+
+  // Persist chat history while inside a room (VP-10.4.2). Runs after each commit
+  // where the message list changed — React batches multiple appends in one tick
+  // into a single save. Guarded on `screen === 'room'` so terminal transitions
+  // (which clear `chatMessages` and the storage entry) never re-save an empty array.
+  useEffect(() => {
+    if (state.screen !== 'room' || !state.activeRoomId) return
+    saveChatHistory(state.activeRoomId, state.chatMessages)
+  }, [state.chatMessages, state.activeRoomId, state.screen])
 
   // Stable setter callbacks
   const setLobbyMode = useCallback((mode: LobbyMode) => setState((prev) => withLobbyMode(prev, mode)), [])
@@ -546,24 +623,18 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     if (socket && roomId) {
       socket.emitLeaveRoom({ roomId })
     }
-    try {
-      sessionStorage.removeItem('vapor-reconnect-session')
-    } catch {
-      // Ignore sessionStorage errors
-    }
+    clearChatHistory(roomId)
+    persistence.clearStoredReconnectSession()
     clearRoomSession()
     setState((previous) => resetToLobby(previous))
-  }, [clearRoomSession])
+  }, [clearRoomSession, persistence])
 
   const backToLobby = useCallback((): void => {
-    try {
-      sessionStorage.removeItem('vapor-reconnect-session')
-    } catch {
-      // Ignore sessionStorage errors
-    }
+    clearChatHistory(stateRef.current.activeRoomId)
+    persistence.clearStoredReconnectSession()
     clearRoomSession()
     setState((previous) => resetToLobby(previous))
-  }, [clearRoomSession])
+  }, [clearRoomSession, persistence])
 
   const kickParticipant = useCallback((targetParticipantId: string): void => {
     const socket = socketRef.current
