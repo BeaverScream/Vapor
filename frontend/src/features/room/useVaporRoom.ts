@@ -457,13 +457,20 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
         }
       }
 
-      // Defensive: if the reconnecting screen is still active but autoResumeRequestedRef
-      // was false (e.g. due to StrictMode double-mount effect timing clearing the ref
-      // before the error arrives), any error response should still return to lobby rather
-      // than leaving the user stuck on the spinner forever.
+      // Defensive: same StrictMode ref-timing symptom — autoResumeRequestedRef was cleared
+      // before the async error resolved. Gate destructive teardown on the fatal resume codes
+      // only; non-fatal / unknown errors still return to lobby but preserve the session token.
       if (previous.screen === 'reconnecting') {
-        clearChatHistory(previous.activeRoomId)
-        persistence.clearStoredReconnectSession()
+        const isResumeTerminalError =
+          errorCode === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND ||
+          errorCode === SIGNALING_ERROR_CODES.INVALID_PASSWORD ||
+          errorCode === SIGNALING_ERROR_CODES.RATE_LIMITED ||
+          errorCode === SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE ||
+          errorCode === SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED
+        if (isResumeTerminalError) {
+          clearChatHistory(previous.activeRoomId)
+          persistence.clearStoredReconnectSession()
+        }
         return resetToLobby(previous)
       }
 

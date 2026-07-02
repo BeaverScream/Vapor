@@ -1,8 +1,6 @@
 # Phase 5 Work Detail - Vapor Refactoring Plan
 
-**Date:** 2026-06-04  
-**Scope:** `backend/` and `frontend/src/features/room/`  
-**Verdict:** Yes — targeted refactoring is warranted. Two files (`registerSocketHandlers.ts` and `useVaporRoom.ts`) have grown into god-file territory and carry concrete maintenance risks. Everything else is already well-structured and should be left alone.
+**Date:** 2026-06-04
 
 ---
 

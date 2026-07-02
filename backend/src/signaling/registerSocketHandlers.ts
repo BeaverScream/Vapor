@@ -244,23 +244,31 @@ export function registerSocketHandlers({
     }
   };
 
-  // Restart the solo-host timer when exactly one live participant remains, returning
-  // the new deadline (or null). Shared by the kick, leave, host-disconnect, and
-  // guest-disconnect paths so the solo-timeout policy stays consistent across all four.
-  const restartSoloTimerIfSolo = (roomId: string, liveCount: number): number | null => {
-    if (liveCount !== 1) return null;
+  // Reconcile the idle timer for the given liveCount — shared by all five paths
+  // (join, resume, disconnect, kick, leave) so idle-timer policy stays consistent.
+  // liveCount ≤ 1: restart the 15-min timer fresh and return the new deadline.
+  // liveCount ≥ 2: cancel any running timer and return null.
+  const reconcileIdleTimer = (roomId: string, liveCount: number): number | null => {
     const policy = graceCtx.roomPolicyById.get(roomId);
     if (!policy) return null;
-    return grace.restartSoloTimer(
-      policy,
-      signaling.SOLO_ROOM_TIMEOUT_MS,
-      now,
-      () => destroyRoom(roomId, "solo_timeout_expired"),
-    );
+    if (liveCount <= 1) {
+      return grace.restartSoloTimer(
+        policy,
+        signaling.IDLE_ROOM_TIMEOUT_MS,
+        now,
+        () => destroyRoom(roomId, "solo_timeout_expired"),
+      );
+    }
+    if (policy.soloTimeoutRef) {
+      clearTimeout(policy.soloTimeoutRef);
+      policy.soloTimeoutRef = undefined;
+      policy.soloDeadlineAt = undefined;
+    }
+    return null;
   };
 
-  // Shared host/guest disconnect emission: compute the live count, restart the
-  // solo timer if the room dropped to one occupant, and broadcast peer_left.
+  // Shared host/guest disconnect emission: compute the live count, reconcile the
+  // idle timer, and broadcast peer_left.
   // Both disconnect branches must stay identical, so they route through here.
   const emitPeerLeftOnDisconnect = (
     socket: Socket,
@@ -269,7 +277,7 @@ export function registerSocketHandlers({
     participantId: string,
   ): void => {
     const liveCount = getLiveParticipantCount(room);
-    const soloDeadlineAt = restartSoloTimerIfSolo(roomId, liveCount);
+    const soloDeadlineAt = reconcileIdleTimer(roomId, liveCount);
     socket.to(roomId).emit(signaling.SERVER_EVENTS.peerLeft, {
       participantId,
       reason: "disconnect",
@@ -366,7 +374,7 @@ export function registerSocketHandlers({
           room.roomId,
           createdAt,
           signaling.ROOM_MAX_DURATION_MS,
-          signaling.SOLO_ROOM_TIMEOUT_MS,
+          signaling.IDLE_ROOM_TIMEOUT_MS,
           () => destroyRoom(room.roomId, "room_ttl_expired"),
           () => destroyRoom(room.roomId, "solo_timeout_expired"),
         );
@@ -483,24 +491,8 @@ export function registerSocketHandlers({
 
         const joinLiveCount = getLiveParticipantCount(joined.room);
         const policy = graceCtx.roomPolicyById.get(roomId);
-        let joinSoloDeadlineAt: number | null = null;
-        if (policy) {
-          if (!policy.hasEverHadGuest) policy.hasEverHadGuest = true;
-          if (joinLiveCount === 1) {
-            // Joining into an empty room (liveCount was 0): cancel the empty-room timer and
-            // start a fresh solo timer for this sole live participant.
-            joinSoloDeadlineAt = grace.restartSoloTimer(
-              policy,
-              signaling.SOLO_ROOM_TIMEOUT_MS,
-              now,
-              () => destroyRoom(roomId, "solo_timeout_expired"),
-            );
-          } else if (policy.soloTimeoutRef) {
-            clearTimeout(policy.soloTimeoutRef);
-            policy.soloTimeoutRef = undefined;
-            policy.soloDeadlineAt = undefined;
-          }
-        }
+        if (policy && !policy.hasEverHadGuest) policy.hasEverHadGuest = true;
+        const joinSoloDeadlineAt = reconcileIdleTimer(roomId, joinLiveCount);
 
         socket.join(roomId);
         metrics.recordRoomJoin(socket.id, roomId);
@@ -633,24 +625,8 @@ export function registerSocketHandlers({
 
           const resumeLiveCount = getLiveParticipantCount(room);
           const policy = graceCtx.roomPolicyById.get(roomId);
-          // Empty-room/solo timer is participant-agnostic (lifecycle.md §1 Rule 8, §3):
-          // whoever returns as the sole live participant — host OR guest — restarts the
-          // solo timer and receives soloDeadlineAt. Mirrors the join_room empty-room path.
-          let resumeSoloDeadlineAt: number | null = null;
-          if (policy) {
-            if (resumeLiveCount === 1) {
-              resumeSoloDeadlineAt = grace.restartSoloTimer(
-                policy,
-                signaling.SOLO_ROOM_TIMEOUT_MS,
-                now,
-                () => destroyRoom(roomId, "solo_timeout_expired"),
-              );
-            } else if (policy.soloTimeoutRef) {
-              clearTimeout(policy.soloTimeoutRef);
-              policy.soloTimeoutRef = undefined;
-              policy.soloDeadlineAt = undefined;
-            }
-          }
+          // Idle timer is participant-agnostic (lifecycle.md §1 Rule 8, §3).
+          const resumeSoloDeadlineAt = reconcileIdleTimer(roomId, resumeLiveCount);
           const roomJoinedPayload: RoomJoinedPayload = {
             roomId,
             participantId: reconnectRecord.participantId,
@@ -806,7 +782,7 @@ export function registerSocketHandlers({
         }
 
         const remainingCount = getLiveParticipantCount(room);
-        const soloDeadlineAt = restartSoloTimerIfSolo(roomId, remainingCount);
+        const soloDeadlineAt = reconcileIdleTimer(roomId, remainingCount);
 
         const peerLeftPayload: PeerLeftPayload = {
           participantId: targetParticipantId,
@@ -830,19 +806,8 @@ export function registerSocketHandlers({
         const remainingRoom = state.rooms.get(removed.roomId);
         if (remainingRoom) {
           const liveCount = getLiveParticipantCount(remainingRoom);
-          if (liveCount === 0) {
-            // Last live participant left; destroy the room rather than letting it linger.
-            // Leave the Socket.IO room first so the leaving socket doesn't receive room_destroyed.
-            socket.leave(removed.roomId);
-            destroyRoom(removed.roomId, "host_grace_expired");
-            metrics.recordDisconnect(socket.id);
-            return;
-          }
-          leaveExtras = { liveCount };
-          const deadline = restartSoloTimerIfSolo(removed.roomId, liveCount);
-          if (deadline !== null) {
-            leaveExtras = { liveCount, soloDeadlineAt: deadline };
-          }
+          const deadline = reconcileIdleTimer(removed.roomId, liveCount);
+          leaveExtras = deadline !== null ? { liveCount, soloDeadlineAt: deadline } : { liveCount };
         }
       }
 

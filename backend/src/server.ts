@@ -54,7 +54,7 @@ export function createVaporServer({
     },
     getActiveSocketCount: () => state.socketToParticipant.size,
     getTemporaryBlocklistSize: () => rateLimitCtx.temporaryBlocklistByIp.size,
-    getRateLimitWindowActiveCount: () => rateLimitCtx.createAttemptsByIp.size,
+    getRateLimitWindowActiveCount: () => rateLimitCtx.createAttemptsByIp.size + rateLimitCtx.ipAbuseByIp.size,
   });
 
   const metricsAdapter = {

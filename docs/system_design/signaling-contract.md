@@ -1,8 +1,6 @@
 # Vapor Signaling Contract (Source of Truth)
 
-Date: 2026-06-29  
-Owner: @sys-architect  
-Status: Active
+Date: 2026-06-29
 
 Part of the Vapor system-design source-of-truth set — navigate via [INDEX.md](./INDEX.md). This file owns the wire protocol: the socket event contract and payloads, the root `shared/` module, contract alignment, and the create/join/mesh signaling sequences. Lifecycle semantics for these events are in [lifecycle.md](./lifecycle.md); error codes in [error-codes.md](./error-codes.md).
 
@@ -29,7 +27,7 @@ shared/                  # Signaling contract (imported by both sides)
 | `shared/events.ts` | `CLIENT_EVENT_NAMES`, `SERVER_EVENT_NAMES` |
 | `shared/error-codes.ts` | `SIGNALING_ERROR_CODES` |
 | `shared/reasons.ts` | `RoomDestroyedReason` union type |
-| `shared/policy.ts` | Rate-limit and timeout policy constants (`JOIN_RATE_LIMIT_WINDOW_MS`, `JOIN_RATE_LIMIT_MAX`, `CREATE_RATE_LIMIT_WINDOW_MS`, `CREATE_RATE_LIMIT_MAX`, `SWEEPER_INTERVAL_HOURS`, etc.) |
+| `shared/policy.ts` | Rate-limit and timeout policy constants (`JOIN_RATE_LIMIT_WINDOW_MS`, `JOIN_RATE_LIMIT_MAX`, `CREATE_RATE_LIMIT_WINDOW_MS`, `SWEEPER_INTERVAL_HOURS`, etc.) |
 | `shared/payloads.ts` | All request/response payload interfaces for signaling events |
 | `shared/index.ts` | Central barrel re-export for all of the above |
 

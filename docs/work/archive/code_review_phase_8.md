@@ -1,8 +1,6 @@
 # Phase 8 Code Review
 
-Date: 2026-06-19  
-Reviewer: Claude (claude-sonnet-4-6)  
-Scope: Phase 8 spec fidelity for VP-8.1 (mobile responsiveness), VP-8.2 (post-kick + solo-timer UX fixes), VP-8.3 (host identity badge), VP-8.4 (browser push notifications), VP-8.5 (human-readable room names), VP-8.6 (desktop layout + participant side panel). Focus on correctness of new socket reset logic, room-name lifecycle integrity, notification privacy compliance (D-5), and layout-mode isolation (D-8).
+Date: 2026-06-19
 
 Verification:
 - `npm run build` (frontend) — **green** (confirmed via phase-8 matrix 8.1.3/8.2.6/8.3.3/8.4.4/8.5.9/8.6.8).

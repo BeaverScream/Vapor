@@ -1,8 +1,6 @@
 # Phase 7 Test Evidence Matrix
 
 Date: 2026-06-16
-Owner: @vapor-pm / @qa-engineer
-Gate Decision: **✅ AUTOMATED GATE PASSED — all implemented automated tests green; manual E2E / code-review / doc-review items out of scope for this run**
 
 ---
 

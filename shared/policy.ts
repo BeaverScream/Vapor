@@ -3,10 +3,9 @@ export const MAX_PARTICIPANTS_PER_ROOM = 5;
 export const HOST_DISCONNECT_GRACE_MS = 60 * 60 * 1000;
 export const GUEST_DISCONNECT_GRACE_MS = 30 * 60 * 1000;
 export const ROOM_MAX_DURATION_MS = 2 * 60 * 60 * 1000;
-export const SOLO_ROOM_TIMEOUT_MS = 15 * 60 * 1000;
+export const IDLE_ROOM_TIMEOUT_MS = 15 * 60 * 1000;
 
 export const SWEEPER_INTERVAL_HOURS = 5;
 export const JOIN_RATE_LIMIT_WINDOW_MS = 60_000;
 export const JOIN_RATE_LIMIT_MAX = 30;
 export const CREATE_RATE_LIMIT_WINDOW_MS = 60_000;
-export const CREATE_RATE_LIMIT_MAX = 30;

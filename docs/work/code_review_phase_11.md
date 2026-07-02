@@ -1,8 +1,6 @@
 ﻿# Code Review — Phase 11
 
 Date: 2026-06-30 (re-review)
-Reviewer: Claude (automated, high-effort)
-Scope: Working-tree diff against `HEAD` (Phase 10 commit). Phase 11 — Spec-Code Alignment & Bug Fixes: VP-11.1 solo-timer rename, VP-11.2 import shared rate-limit constants, VP-11.4 guest-grace count, VP-11.5 remove nickname-update feature, VP-11.6 kick reason/order, VP-11.7 drop heartbeat, VP-11.8 raise IP create threshold. Special focus: conflicts against the 2026-06-29 system-design spec update, plus a full review of the test suite for obsolete / stale tests.
 
 **Re-review note (2026-06-30):** Each prior finding (CR11-1…CR11-7) was re-verified against the current source — all remain **Fixed/Closed** (see per-item *Re-verified* lines). The second pass surfaced **two new findings**: a High-severity active backend test that Phase 11 broke and that was missed in the first pass (CR11-8), and a Low-severity dead-state / validation-ordering note that corrects an inaccurate claim in the original Summary (CR11-9).
 
@@ -335,9 +333,9 @@ This contradicts lifecycle.md **Rule 4**: *"If the guest was the last live parti
 
 The inline comment (*"Last live participant left; destroy the room rather than letting it linger"*) encodes the pre-spec model. CR11-3 already removed the analogous immediate-destroy from `handleGuestGraceExpired`; this leave path was missed.
 
-**Recommendation (user decision per System Sync):** align with Rule 4 / §3 — on `liveCount === 0` with `roomStillActive`, do **not** `destroyRoom`; enter empty-room behavior (the solo/empty-room timer, restarted fresh, owns destruction with `solo_timeout_expired`). Mirror the disconnect path (`emitPeerLeftOnDisconnect` → the empty-room timer), so leave and disconnect converge on one empty-room policy. If immediate destroy is intentionally desired for the explicit-leave case, the reason must still be corrected and lifecycle.md Rule 4/§3 reconciled explicitly.
+**Resolution:** Fixed (user decision, 2026-07-01 — align code to the existing spec per lifecycle.md §1 Rule 4 / §3; no design-doc behavioral change, only the constant rename from `SOLO_ROOM_TIMEOUT_MS` → `IDLE_ROOM_TIMEOUT_MS`). The `liveCount === 0` branch in `leave_room` no longer calls `destroyRoom`. Instead it calls `grace.restartSoloTimer(policy, signaling.IDLE_ROOM_TIMEOUT_MS, now, () => destroyRoom(removed.roomId, "solo_timeout_expired"))` to start a fresh 15-min empty-room window. Host grace continues in parallel; the earliest deadline wins (Rule 10). The handler falls through to `emitParticipantExit` (handles `socket.leave` and the zero-recipient `peer_left` broadcast). The hard-destroy path and mislabeled `host_grace_expired` metric are eliminated. Regression tests `T-CR14-01` and `T-CR14-02` added to phase-11.md (Pending — test code implementation not yet requested).
 
-**Status:** Open.
+**Status:** Fixed.
 
 ---
 
@@ -352,9 +350,9 @@ The empty-room/solo timer is manipulated in three places with **subtly different
 
 The helper is safe *today* only because disconnect/kick can only **decrease** `liveCount` (a stale >1 timer cannot exist). That invariant is implicit and undocumented, and the two inline blocks already prove the mechanism needs the cancel branch. The moment a future count-**increasing** path is routed through `restartSoloTimerIfSolo`, it will silently leave a prior timer armed and destroy a now-multi-party room via `solo_timeout_expired`. CR11-12 was itself caused by exactly one of these copies diverging from the other.
 
-**Recommendation:** extract a single `reconcileSoloTimer(roomId, liveCount)` in the grace module that derives the correct timer state from the live count (restart at 1, cancel at ≥2, and — per CR11-14 — restart-fresh at 0) and returns the deadline, then call it from join / resume / disconnect / kick / leave. Add a `clearSoloTimer(policy)` primitive so the `soloTimeoutRef`/`soloDeadlineAt` invariant is owned by the module that owns the fields rather than open-coded at call sites.
+**Resolution:** Fixed (2026-07-01, following CR11-14 which added a 4th inline copy and made consolidation urgent). `restartSoloTimerIfSolo` is replaced by `reconcileIdleTimer(roomId, liveCount)`: `liveCount ≤ 1` → restart the 15-min idle timer fresh and return the deadline; `liveCount ≥ 2` → cancel any running timer and return null. All five paths (join, resume, disconnect, kick, leave) now call `reconcileIdleTimer` — the `join_room` and `resume_session` inline blocks and the CR11-14 leave_room if/else are each collapsed to a single call. Side-effect: the disconnect path at `liveCount === 0` now restarts the timer fresh (new 15-min window) instead of letting the prior timer run out — spec-correct per lifecycle.md Rule 8.
 
-**Status:** Open.
+**Status:** Fixed.
 
 ---
 
@@ -375,9 +373,9 @@ if (previous.screen === 'reconnecting') {
 
 This patches a StrictMode ref-timing symptom rather than the root cause (a ref cleared by the double-mount before the async resume error resolves). In practice the realistic errors during an in-flight resume (`RECONNECT_TOKEN_STALE`, `HOST_RECONNECT_WINDOW_EXPIRED`, `ROOM_NOT_FOUND`, `INVALID_PASSWORD`, `RATE_LIMITED`) are all already handled by the `autoResumeRequestedRef` block above and resolve to lobby anyway, so today the outcome matches spec §5 (FAIL → lobby). The risk is that this catch-all **cannot distinguish** a benign/transient error from a fatal one: any future or out-of-band error code delivered during the reconnecting screen will now unconditionally wipe a still-valid reconnect token and delete chat history with no retry path.
 
-**Recommendation:** gate the reconnect teardown on the same fatal-code set used above, or make the resume lifecycle authoritative about its own in-flight state (key off `state.screen`/a request id that survives remount) instead of a ref that StrictMode can clear. Low priority given the current reachable set.
+**Resolution:** Gated the destructive teardown (chat clear + session wipe) on the same fatal resume error codes as the `autoResumeRequestedRef` block above (`ROOM_NOT_FOUND`, `INVALID_PASSWORD`, `RATE_LIMITED`, `RECONNECT_TOKEN_STALE`, `HOST_RECONNECT_WINDOW_EXPIRED`). Non-fatal or unknown errors during `screen === 'reconnecting'` still navigate to lobby (avoiding the spinner) but no longer wipe a still-valid reconnect token or chat history. ([useVaporRoom.ts:460–474](../../frontend/src/features/room/useVaporRoom.ts#L460-L474))
 
-**Status:** Open.
+**Status:** Fixed.
 
 ---
 
@@ -388,9 +386,9 @@ This patches a StrictMode ref-timing symptom rather than the root cause (a ref c
 
 The metric was `createAttemptsBySubject.size + joinAttemptByRoomSubject.size` and is now `createAttemptsByIp.size` alone. `joinAttemptByRoomSubject` was removed (CR11-4), and join-rate activity now lives in `ipAbuseByIp` (its `joinCount`), which the metric does not consult. During a join-flood the gauge stays low, hiding the pressure from the observability surface that previously summed both maps.
 
-**Recommendation:** if join-rate pressure is worth surfacing, add `ipAbuseByIp.size` (or a join-specific derivation) to the gauge, or document that the metric is create-only. Low priority.
+**Resolution:** Added `ipAbuseByIp.size` to the gauge: `createAttemptsByIp.size + ipAbuseByIp.size`. `ipAbuseByIp` tracks both create and join activity per IP in the same 60 s window, so its size reflects join-flood pressure. This mirrors the old two-map sum. ([server.ts:57](../../backend/src/server.ts#L57))
 
-**Status:** Open.
+**Status:** Fixed.
 
 ---
 
@@ -404,7 +402,9 @@ Three observations in the rekeyed limiter (none is a functional break; grouped f
 - **Redundant window constants.** `CREATE_RATE_LIMIT_WINDOW_MS` and `JOIN_RATE_LIMIT_WINDOW_MS` are both `60_000` and both applied against the **same** shared `ipAbuseByIp` record (the create path expires that record on `JOIN_RATE_LIMIT_WINDOW_MS`, line 166). Tuning only one would desync the create-burst sweep from the shared IP window. Collapse to one window constant or document the coupling.
 - **IP-only keying is coarser than the old subject key.** `deriveIp(socket)` alone now buckets all clients behind one NAT/reverse-proxy IP into a single 30/min window and a single burst blocklist, so one user's traffic can rate-limit or 10-min-block everyone on that IP (the previous `ip|ua|fingerprint` subject key isolated them). This is the intended VP-11.2 direction and consistent with lifecycle.md §7 "prefer aggregate detection," but flag it for deployment awareness (behind a proxy, `handshake.address` may be the upstream IP for everyone).
 
-**Status:** Open.
+**Resolution:** Removed `CREATE_RATE_LIMIT_MAX` and `createCount` from `IpAbuseRecord` — the burst gate (`CREATE_ROOM_BURST_THRESHOLD=5`) always fires first, so the IP ceiling was unreachable. `checkAndRecordCreateAttempt` no longer touches `ipAbuseByIp`, cleanly separating the two maps (each with its own window constant). T11.8-01/02 commented SPEC-INVALID. NAT/proxy deployment note added to `deriveIp`. Design docs (`core-architecture.md §2`, `signaling-contract.md §2`) updated to match.
+
+**Status:** Fixed.
 
 ---
 
@@ -415,7 +415,7 @@ Three observations in the rekeyed limiter (none is a functional break; grouped f
 
 Line 85 already establishes membership via `room.participants.has(fromParticipantId)`; line 96 then re-fetches the same record with a non-null assertion — `room.participants.get(fromParticipantId)!.lastSeenAt = now()` — a second hash lookup on the busiest server path plus a `!` that re-asserts an invariant proven 11 lines earlier. Fetch the record once at line 85 (`const fromParticipant = room.participants.get(fromParticipantId); if (!fromParticipant) { emitNotFound(); return null; }`) and set `fromParticipant.lastSeenAt = now()`, removing both the redundant lookup and the assertion. (Interacts with CR11-9 / BL-FEAT-LASTSEEN-01 — the stamp still precedes payload validation.)
 
-**Status:** Open.
+**Status:** Fixed. Replaced `room.participants.has(fromParticipantId)` + `room.participants.get(fromParticipantId)!` pair with a single `room.participants.get(fromParticipantId)` null-check; `fromParticipant.lastSeenAt = now()` uses the already-fetched record.
 
 ---
 
@@ -441,8 +441,8 @@ Line 85 already establishes membership via `room.participants.has(fromParticipan
 
 - **OOS-3 — `e2e/03-lifecycle.spec.ts:139` contradicts lifecycle.md §1 Rule 2 / §3 `join_room when liveCount === 0` rule.** Removed the `liveCount === 0` guard from the join handler ([registerSocketHandlers.ts:417–420](../../backend/src/signaling/registerSocketHandlers.ts#L417-L420)) that was returning `ROOM_NOT_FOUND`. Timer logic restructured: joining into an empty room (joinLiveCount === 1) now cancels the empty-room timer and restarts the solo timer, surfacing `soloDeadlineAt` in `room_joined`; second+ participant joining still clears the solo timer. E2e test renamed and updated to assert the joiner successfully enters the room and sees "1 participant". **Fixed.**
 
-- **OOS-4 (CR11-15) — Solo-timer restart/cancel logic forked across three call sites.** `restartSoloTimerIfSolo` (disconnect/kick) only restarts; `join_room` and `resume_session` both restart-and-cancel via near-identical copies. Safe today due to an implicit invariant (kick/disconnect can only decrease `liveCount`). Design debt — candidate for a `reconcileSoloTimer(roomId, liveCount)` helper that owns both branches. See CR11-15.
+- **OOS-4 (CR11-15) — Solo-timer restart/cancel logic forked across call sites. Fixed** (2026-07-01): CR11-14 added a 4th inline copy making consolidation urgent; `restartSoloTimerIfSolo` replaced by `reconcileIdleTimer(roomId, liveCount)` covering all five paths. See CR11-15.
 
-- **OOS-5 (CR11-18) — Rate-limit module: unreachable `CREATE_RATE_LIMIT_MAX` ceiling, redundant window aliases, IP-only NAT trade-off.** `CREATE_RATE_LIMIT_MAX` (30) is never reached because the burst gate (5) always fires first. `CREATE_RATE_LIMIT_WINDOW_MS` and `JOIN_RATE_LIMIT_WINDOW_MS` are identical aliases for the same shared `ipAbuseByIp` map — tuning one desynchs the other. IP-only keying is the intended VP-11.2 direction but collapses all NAT users into one bucket; flag for deployment configuration. See CR11-18.
+- **OOS-5 (CR11-18) — Rate-limit module: unreachable `CREATE_RATE_LIMIT_MAX` ceiling, redundant window aliases, IP-only NAT trade-off. Fixed.** `CREATE_RATE_LIMIT_MAX` and `createCount` removed; `checkAndRecordCreateAttempt` no longer touches `ipAbuseByIp` (the two maps are now cleanly separate). T11.8-01/02 commented out as SPEC-INVALID. NAT deployment note added to `deriveIp`. See CR11-18.
 
-- **OOS-6 (CR11-19) — `resolveSignalRoute` redundant `Map.get` + `!` on the signal relay hot path.** Membership already proven via `.has()`; refetch with a null check to remove the assertion and the second lookup. See CR11-19.
+- **OOS-6 (CR11-19) — `resolveSignalRoute` redundant `Map.get` + `!` on the signal relay hot path. Fixed.** Replaced `.has()` + `.get()!` pair with a single `.get()` null-check; the fetched record is reused directly for `lastSeenAt`. See CR11-19.

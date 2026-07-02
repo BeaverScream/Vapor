@@ -1,9 +1,6 @@
 # Vapor Frontend UI Specification (Consolidated)
 
-Date: 2026-06-22  
-Owner: @fe-expert  
-Audience: UI/UX Review  
-Status: Active
+Date: 2026-06-22
 
 ## 1) Purpose
 

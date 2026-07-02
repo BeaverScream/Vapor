@@ -1,7 +1,6 @@
 # Phase 3 — Detailed Work Matrix
 
 Date: 2026-06-01
-Owner: @vapor-pm
 
 ## Table of Contents
 

@@ -1,8 +1,6 @@
 # Vapor File Transfer (Source of Truth)
 
-Date: 2026-06-29  
-Owner: @sys-architect  
-Status: Active
+Date: 2026-06-29
 
 Part of the Vapor system-design source-of-truth set — navigate via [INDEX.md](./INDEX.md). This file owns the P2P file-transfer subsystem: architecture, ICE/NAT, chunking, the data-channel message types, consent/targeting flow, room-lifetime interaction, and session-scoped resume. File transfer reuses the WebRTC peer connection established in [signaling-contract.md](./signaling-contract.md) §7; the server is never involved in content. Constants are in [core-architecture.md](./core-architecture.md) §2.
 

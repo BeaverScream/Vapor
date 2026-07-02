@@ -1,8 +1,6 @@
 # Vapor Error Codes (Source of Truth)
 
-Date: 2026-06-29  
-Owner: @sys-architect  
-Status: Active
+Date: 2026-06-29
 
 Part of the Vapor system-design source-of-truth set — navigate via [INDEX.md](./INDEX.md). This file owns the deterministic, closed set of signaling error codes. Codes are defined in `shared/error-codes.ts` and imported by both sides (see [signaling-contract.md](./signaling-contract.md)). User-facing copy mapping lives in `frontend/src/features/room/error-copy.ts` and [frontend-ui-spec.md](./frontend-ui-spec.md) §9.4 — never duplicate copy strings here.
 

@@ -1,8 +1,6 @@
 # Phase 10 — Bug Fix & Chat Persistence
 
-Date: 2026-06-24  
-Owner: @vapor-pm  
-Status: Planned
+Date: 2026-06-24
 
 **Scope:** Fix the E2E bugs discovered during Phase 9 validation testing and introduce chat history persistence (session-scoped, local-only). All bugs are non-critical functionality issues that do not affect room creation, joining, or basic signaling.
 

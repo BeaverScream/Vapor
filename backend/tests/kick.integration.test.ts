@@ -2,7 +2,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CLIENT_EVENTS, SERVER_EVENTS, SOLO_ROOM_TIMEOUT_MS } from "../src/signaling/contracts";
+import { CLIENT_EVENTS, SERVER_EVENTS, IDLE_ROOM_TIMEOUT_MS } from "../src/signaling/contracts";
 import { registerSocketHandlers } from "../src/signaling/registerSocketHandlers";
 import { createSignalingState } from "../src/signaling/state";
 
@@ -271,8 +271,8 @@ test("kicking the last guest emits peer_left with soloDeadlineAt to the host", (
   );
   assert.equal(
     peerLeft.soloDeadlineAt,
-    TIME + SOLO_ROOM_TIMEOUT_MS,
-    "soloDeadlineAt must equal now() + SOLO_ROOM_TIMEOUT_MS",
+    TIME + IDLE_ROOM_TIMEOUT_MS,
+    "soloDeadlineAt must equal now() + IDLE_ROOM_TIMEOUT_MS",
   );
 });
 

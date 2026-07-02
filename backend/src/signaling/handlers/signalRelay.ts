@@ -82,7 +82,8 @@ export function resolveSignalRoute(
   }
 
   const room = state.rooms.get(roomId as string);
-  if (!room || !room.participants.has(fromParticipantId)) {
+  const fromParticipant = room?.participants.get(fromParticipantId);
+  if (!room || !fromParticipant) {
     emitNotFound();
     return null;
   }
@@ -93,7 +94,7 @@ export function resolveSignalRoute(
     return null;
   }
 
-  room.participants.get(fromParticipantId)!.lastSeenAt = now();
+  fromParticipant.lastSeenAt = now();
   return {
     roomId: roomId as string,
     fromParticipantId,

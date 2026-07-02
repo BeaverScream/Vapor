@@ -1,8 +1,6 @@
 # Vapor Backend Overview
 
-Date: 2026-06-26  
-Owner: @be-expert  
-Status: Active
+Date: 2026-06-26
 
 ## Purpose
 
@@ -85,8 +83,8 @@ A disconnected-but-in-grace participant is kept in `room.participants` with its 
 
 - **One connection handler.** `io.on("connection")` registers every `socket.on(...)` listener. Handlers validate payload → check auth/rate limits → mutate state via `roomLifecycle`/handler functions → emit server events.
 - **Room destruction is centralized.** `destroyRoom(roomId, reason)` is the single teardown path: clears policy timers, reconnect tokens, auth, rate-limit records, nickname maps, and all index Maps, then emits `room_destroyed`. Every lifecycle trigger routes through it.
-- **Timer-driven policies** live in `graceWindowManager`: room TTL (`ROOM_MAX_DURATION_MS`), solo timeout (`SOLO_ROOM_TIMEOUT_MS` — applies to any lone live participant, not host-specific), host grace (`HOST_DISCONNECT_GRACE_MS`), guest grace (`GUEST_DISCONNECT_GRACE_MS`). All timers `unref()` so they never keep the process alive.
-- **Solo timeout applies to any lone live participant.** `restartSoloTimerIfSolo` restarts the deadline whenever a room drops to exactly one *live* participant, host or guest. The same 15-min timer continues to govern a fully empty room (`liveCount` 0) and fires `solo_timeout_expired`.
+- **Timer-driven policies** live in `graceWindowManager`: room TTL (`ROOM_MAX_DURATION_MS`), idle timeout (`IDLE_ROOM_TIMEOUT_MS` — fires when `liveCount` stays ≤ 1 for 15 min, covers both lone-participant and empty-room states), host grace (`HOST_DISCONNECT_GRACE_MS`), guest grace (`GUEST_DISCONNECT_GRACE_MS`). All timers `unref()` so they never keep the process alive.
+- **Idle timeout covers `liveCount` ≤ 1.** `restartSoloTimerIfSolo` restarts the deadline whenever `liveCount` drops to 1; the timer also covers `liveCount` 0 (empty room after all disconnect or last live guest explicitly leaves) and fires `solo_timeout_expired` in both cases.
 - **Async mutations take a per-room lock.** `withRoomLock(roomId, fn)` serializes `resume_session` and `room_password_update` against one another to avoid interleaved state races.
 - **Periodic sweep** (`setInterval`, `sweepIntervalMs`) is a safety net, not the primary path: it destroys TTL-expired rooms, prunes expired reconnect tokens and rate-limit records, and reconciles orphaned index entries.
 

@@ -1,9 +1,7 @@
 # Document Template
 
 Title: 
-Date: 
-Owner: @vapor-pm
-Status: Draft | Review | Final
+Date:
 
 ## Purpose
 A short (1-3 sentence) description of why this document exists and what decision or knowledge it captures.

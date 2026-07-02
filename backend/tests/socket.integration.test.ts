@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createVaporServer } from "../src/server";
-import { CLIENT_EVENTS, GUEST_DISCONNECT_GRACE_MS, HOST_DISCONNECT_GRACE_MS, SERVER_EVENTS, SOLO_ROOM_TIMEOUT_MS } from "../src/signaling/contracts";
+import { CLIENT_EVENTS, GUEST_DISCONNECT_GRACE_MS, HOST_DISCONNECT_GRACE_MS, SERVER_EVENTS, IDLE_ROOM_TIMEOUT_MS } from "../src/signaling/contracts";
 import { registerSocketHandlers } from "../src/signaling/registerSocketHandlers";
 import { createSignalingState, getSignalingStateSnapshot } from "../src/signaling/state";
 import { createMetrics } from "../src/admin/metrics";
@@ -1469,7 +1469,7 @@ test("T3.1-07 (P3-SH-007): solo-host timer handle is cleared when first guest jo
 
     // Capture the solo-host timer handle before any guest joins
     const soloTimer = scheduledTimeouts.find(
-      (entry) => entry.delay === SOLO_ROOM_TIMEOUT_MS && !entry.handle.cleared
+      (entry) => entry.delay === IDLE_ROOM_TIMEOUT_MS && !entry.handle.cleared
     );
     assert.ok(soloTimer, "Solo-host timer must be scheduled at room creation");
 
@@ -1498,7 +1498,7 @@ test("T3.1-07 (P3-SH-007): solo-host timer handle is cleared when first guest jo
 
     // Second guest joins — no new solo timer is scheduled (hasEverHadGuest gate)
     const timerCountBeforeSecondGuest = scheduledTimeouts.filter(
-      (entry) => entry.delay === SOLO_ROOM_TIMEOUT_MS
+      (entry) => entry.delay === IDLE_ROOM_TIMEOUT_MS
     ).length;
 
     guest2.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest2" });
@@ -1506,7 +1506,7 @@ test("T3.1-07 (P3-SH-007): solo-host timer handle is cleared when first guest jo
     host.popEvent(SERVER_EVENTS.peerJoined);
 
     const timerCountAfterSecondGuest = scheduledTimeouts.filter(
-      (entry) => entry.delay === SOLO_ROOM_TIMEOUT_MS
+      (entry) => entry.delay === IDLE_ROOM_TIMEOUT_MS
     ).length;
 
     assert.equal(
@@ -1873,7 +1873,7 @@ test("P3-LC-001 (BL-SESSION-04): solo-host room is destroyed with solo_timeout_e
 
     // Find the solo-host timer and fire it — only the uncleared one with the correct delay
     const soloTimer = scheduledTimeouts.find(
-      (entry) => entry.delay === SOLO_ROOM_TIMEOUT_MS && !entry.handle.cleared
+      (entry) => entry.delay === IDLE_ROOM_TIMEOUT_MS && !entry.handle.cleared
     );
     assert.ok(soloTimer, "Solo-host timeout must be scheduled on room creation");
     soloTimer.callback();
@@ -1935,7 +1935,7 @@ test("P3-LC-002 (P3-SH-007): solo-host timer handle is cleared when first guest 
 
     // Capture the solo timer handle before the guest joins
     const soloTimer = scheduledTimeouts.find(
-      (entry) => entry.delay === SOLO_ROOM_TIMEOUT_MS && !entry.handle.cleared
+      (entry) => entry.delay === IDLE_ROOM_TIMEOUT_MS && !entry.handle.cleared
     );
     assert.ok(soloTimer, "Solo-host timer must be scheduled on room creation");
 

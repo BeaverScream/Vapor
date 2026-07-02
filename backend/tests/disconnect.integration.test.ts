@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   CLIENT_EVENTS,
   SERVER_EVENTS,
-  SOLO_ROOM_TIMEOUT_MS,
+  IDLE_ROOM_TIMEOUT_MS,
   GUEST_DISCONNECT_GRACE_MS,
   HOST_DISCONNECT_GRACE_MS,
 } from "../src/signaling/contracts";
@@ -238,8 +238,8 @@ test("guest TCP drop leaving host alone → peer_left carries soloDeadlineAt", (
   );
   assert.equal(
     peerLeft?.soloDeadlineAt,
-    TIME + SOLO_ROOM_TIMEOUT_MS,
-    "soloDeadlineAt equals now() + SOLO_ROOM_TIMEOUT_MS",
+    TIME + IDLE_ROOM_TIMEOUT_MS,
+    "soloDeadlineAt equals now() + IDLE_ROOM_TIMEOUT_MS",
   );
 });
 
@@ -267,7 +267,7 @@ test("all guests TCP drop → peer_left emitted per guest; final drop leaves hos
   assert.equal(secondPeerLeft?.participantCount, 1, "only the host remains live");
   assert.equal(
     secondPeerLeft?.soloDeadlineAt,
-    TIME + SOLO_ROOM_TIMEOUT_MS,
+    TIME + IDLE_ROOM_TIMEOUT_MS,
     "final guest drop restarts the solo timer for the lone host",
   );
 
@@ -471,7 +471,7 @@ test("T11.4-02: guest grace expiry with only host sentinel remaining — solo ti
 
     // Solo timer fires (armed when host disconnected with liveCount=1) → destroys room
     const soloTimer = scheduledTimeouts.find(
-      (e) => e.delay === SOLO_ROOM_TIMEOUT_MS && !e.handle.cleared,
+      (e) => e.delay === IDLE_ROOM_TIMEOUT_MS && !e.handle.cleared,
     );
     assert.ok(soloTimer, "solo/empty-room timer must be scheduled (armed when host disconnected with liveCount=1)");
     soloTimer.handle.cleared = true;
@@ -518,4 +518,52 @@ test("T11.4-03: guest grace expiry with host still live — room survives, live 
   } finally {
     restore();
   }
+});
+
+// ---- CR15-02: second disconnect at liveCount → 0 restarts idle timer fresh ----
+
+test("T-CR15-02: second disconnect at liveCount → 0 restarts idle timer fresh from guest-disconnect moment", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+
+  const FIRST_TICK = 1_000; // advance clock between host and guest drops
+
+  const { io, getSnapshot } = setupHarness();
+  const host = io.connect("socket-host");
+  const guest = io.connect("socket-guest");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest" });
+  guest.popEvent(SERVER_EVENTS.roomJoined);
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  // Host drops → liveCount → 1 → idle timer armed (fires at mock-time IDLE_ROOM_TIMEOUT_MS)
+  host.triggerDisconnect();
+  guest.popEvent(SERVER_EVENTS.peerLeft);
+  guest.popEvent(SERVER_EVENTS.hostReconnectGrace);
+
+  // Advance clock partially — before the original deadline
+  t.mock.timers.tick(FIRST_TICK);
+  assert.equal(getSnapshot().roomCount, 1, "room alive after FIRST_TICK");
+
+  // Guest drops → liveCount → 0 → reconcileIdleTimer clears old timer and restarts fresh
+  // New timer fires at mock-time (FIRST_TICK + IDLE_ROOM_TIMEOUT_MS)
+  guest.triggerDisconnect();
+
+  // Tick to the original deadline — old timer is gone; new timer hasn't fired yet
+  t.mock.timers.tick(IDLE_ROOM_TIMEOUT_MS - FIRST_TICK);
+  assert.equal(
+    getSnapshot().roomCount,
+    1,
+    "room must survive past original host-disconnect deadline — idle timer was restarted from guest-disconnect moment",
+  );
+
+  // Tick the remaining FIRST_TICK to hit the fresh deadline
+  t.mock.timers.tick(FIRST_TICK);
+  assert.equal(getSnapshot().roomCount, 0, "room destroyed at fresh idle timer deadline from guest-disconnect moment");
+
+  const destroyed = guest.popEvent(SERVER_EVENTS.roomDestroyed) as { reason: string } | undefined;
+  assert.ok(destroyed, "socket receives room_destroyed after fresh idle timer fires");
+  assert.equal(destroyed?.reason, "solo_timeout_expired", "destroy reason is solo_timeout_expired");
 });

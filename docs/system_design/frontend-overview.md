@@ -1,8 +1,6 @@
 # Vapor Frontend Overview
 
-Date: 2026-06-22  
-Owner: @fe-expert  
-Status: Active
+Date: 2026-06-22
 
 ## Purpose
 

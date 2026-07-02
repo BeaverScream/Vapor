@@ -1,8 +1,6 @@
 # Phase 4 — Detailed Work Matrix
 
 Date: 2026-06-04
-Owner: @vapor-pm
-Status: Active
 
 ## Purpose
 Detailed execution plan for Phase 4 focusing on identity display, performance optimization, open-room support, and advanced peer features.

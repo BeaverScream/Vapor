@@ -1,8 +1,6 @@
 # Phase 11 — Spec-Code Alignment & Bug Fixes
 
 Date: 2026-06-29
-Owner: @vapor-pm
-Status: Planned
 
 **Scope:** Seven targeted fixes addressing spec/code misalignment and correctness issues discovered in the Phase 10 code review, plus two additions (VP-11.7, VP-11.8) decided during Phase 11 planning. Items are independent and can be implemented in any order.
 
@@ -51,6 +49,7 @@ Status: Planned
 | 11.1.1 | Rename constant definition | `shared/policy.ts:6` | Change `export const SOLO_HOST_ROOM_TIMEOUT_MS` to `export const SOLO_ROOM_TIMEOUT_MS`. Value `15 * 60 * 1000` unchanged. | Implemented | `shared/policy.ts` exports `SOLO_ROOM_TIMEOUT_MS`; old name no longer exists. | `shared/policy.ts:6` |
 | 11.1.2 | Update contracts.ts re-export | `backend/src/signaling/contracts.ts:60` | Change `SOLO_HOST_ROOM_TIMEOUT_MS` to `SOLO_ROOM_TIMEOUT_MS` in named re-export block. | Implemented | `contracts.ts` re-exports `SOLO_ROOM_TIMEOUT_MS`; no reference to old name remains. | `contracts.ts:60` |
 | 11.1.3 | Update all usage sites in registerSocketHandlers.ts | `backend/src/signaling/registerSocketHandlers.ts` lines ~260, 399, 696 | Three call sites reference `signaling.SOLO_HOST_ROOM_TIMEOUT_MS` in `restartSoloTimerIfSolo`, `createRoom` grace policy, and `resume_session` solo timer restart. Change each to `signaling.SOLO_ROOM_TIMEOUT_MS`. | Implemented | All three sites use the new name; application code compiles cleanly. | `registerSocketHandlers.ts:260,399,696` |
+| 11.1.4 | Second rename: `SOLO_ROOM_TIMEOUT_MS` → `IDLE_ROOM_TIMEOUT_MS` | `shared/policy.ts`, `contracts.ts`, `registerSocketHandlers.ts`, all test files, all system design docs | "Idle" captures both liveCount === 1 (lone participant) and liveCount === 0 (empty room) — the timer fires for both. Update conceptual references from "solo timer" to "idle timer" in lifecycle.md, core-architecture.md, backend-overview.md, Backlog.md. | Implemented | `IDLE_ROOM_TIMEOUT_MS` is the sole symbol in shared and backend; grep for `SOLO_ROOM_TIMEOUT_MS` returns 0 matches across all files; typecheck clean. | `shared/policy.ts`, `contracts.ts`, all consumers |
 
 ### Test Plan
 
@@ -199,5 +198,47 @@ Status: Planned
 
 | Test # | Suite | Purpose | Verification Focus | Status |
 |--------|-------|---------|-------------------|--------|
-| T11.8-01 | unit (new) | `CREATE_RATE_LIMIT_MAX` constant equals 30 | Import `CREATE_RATE_LIMIT_MAX` from `@shared`; assert value equals 30 | Pass |
-| T11.8-02 | unit (new) | IP create block triggers at 31st attempt, not 11th | Call `checkAndRecordCreateAttempt` directly with pre-populated context (createCount=10); assert 11th attempt is not blocked; reset with createCount=30; assert 31st is rate-limited | Pass |
+| T11.8-01 | unit (new) | `CREATE_RATE_LIMIT_MAX` constant equals 30 | Import `CREATE_RATE_LIMIT_MAX` from `@shared`; assert value equals 30 | Removed (SPEC-INVALID, CR11-18) |
+| T11.8-02 | unit (new) | IP create block triggers at 31st attempt, not 11th | Call `checkAndRecordCreateAttempt` directly with pre-populated context (createCount=10); assert 11th attempt is not blocked; reset with createCount=30; assert 31st is rate-limited | Removed (SPEC-INVALID, CR11-18) |
+
+---
+
+## CR11-14 Fix: leave_room Empty-Room Behavior
+
+**Source:** Code review finding CR11-14 (fourth pass, 2026-07-01). The `leave_room` handler was the last untouched sibling of the CR11-3 / CR11-12 / CR11-13 empty-room family. Pre-existing code; user decision to fix in Phase 11 scope.
+
+### Implementation Matrix
+
+| Subtask | Task | Module / Interface | Detail | Status | Pass Criteria | Evidence Pointer |
+|---------|------|--------------------|--------|--------|---------------|-----------------|
+| CR14.1 | Replace hard-destroy with idle timer restart in `leave_room` | `backend/src/signaling/registerSocketHandlers.ts` leave_room handler | When `liveCount === 0` after a guest explicitly leaves (host sentinel still present, `roomStillActive === true`), do **not** call `destroyRoom`. Instead call `grace.restartSoloTimer(policy, signaling.IDLE_ROOM_TIMEOUT_MS, now, () => destroyRoom(removed.roomId, "solo_timeout_expired"))` to start a fresh 15-min window. Host grace continues in parallel; earliest deadline wins (lifecycle.md §1 Rule 10). Restructure as `if (liveCount === 0) { ... } else { restartSoloTimerIfSolo(...) }` so the two paths are mutually exclusive. Fall through to `emitParticipantExit` (handles `socket.leave`, peer_left broadcast to zero live recipients). | Implemented | `leave_room` with `liveCount === 0` starts `IDLE_ROOM_TIMEOUT_MS` timer with `solo_timeout_expired` callback; no `destroyRoom("host_grace_expired")` call; room remains alive after guest leaves; typecheck clean. | `registerSocketHandlers.ts` leave_room handler |
+
+### Test Plan
+
+| Test # | Suite | Purpose | Verification Focus | Status |
+|--------|-------|---------|-------------------|--------|
+| T-CR14-01 | integration (new — backend) | Guest explicitly leaves while host is a sentinel; room enters empty-room behavior, not immediate destroy | Host + Guest. Host disconnects (sentinel). Guest emits `leave_room`. Assert: room still exists in state; `IDLE_ROOM_TIMEOUT_MS` timer armed; no `room_destroyed` emitted. Fire the idle timer → room destroyed with `solo_timeout_expired`. | Pass |
+| T-CR14-02 | integration (new — backend) | Host resumes within idle window after guest leaves | Host + Guest. Host disconnects. Guest leaves. Host resumes within 15 min (before idle timer fires). Assert: idle timer cancelled; room still alive; `session_resumed` delivered to host. | Pass |
+
+---
+
+## CR11-15 Fix: Unified Idle Timer Reconciliation
+
+**Source:** Code review finding CR11-15 (fourth pass, OOS-4). CR11-14 added a 4th inline copy; user asked to consolidate immediately.
+
+### Implementation Matrix
+
+| Subtask | Task | Module / Interface | Detail | Status | Pass Criteria | Evidence Pointer |
+|---------|------|--------------------|--------|--------|---------------|-----------------|
+| CR15.1 | Replace `restartSoloTimerIfSolo` with `reconcileIdleTimer` | `backend/src/signaling/registerSocketHandlers.ts` | Remove `restartSoloTimerIfSolo`. Add `reconcileIdleTimer(roomId, liveCount)`: `liveCount ≤ 1` → `grace.restartSoloTimer(...)` and return deadline; `liveCount ≥ 2` → `clearTimeout(policy.soloTimeoutRef)` + clear fields + return null. | Implemented | `restartSoloTimerIfSolo` symbol is gone (grep returns 0 matches); `reconcileIdleTimer` is the single helper; typecheck clean. | `registerSocketHandlers.ts` lines ~247–268 |
+| CR15.2 | Collapse `join_room` inline timer block to one call | `registerSocketHandlers.ts` join_room handler | Replace 14-line if/else block with `const joinSoloDeadlineAt = reconcileIdleTimer(roomId, joinLiveCount)`. Keep `policy.hasEverHadGuest` assignment; `policy` variable kept for later `expiresAt` use. | Implemented | join_room timer block is a single `reconcileIdleTimer` call; comment removed; no inline `grace.restartSoloTimer` or `clearTimeout`. | `registerSocketHandlers.ts` join_room |
+| CR15.3 | Collapse `resume_session` inline timer block to one call | `registerSocketHandlers.ts` resume_session handler | Replace 13-line if/else block with `const resumeSoloDeadlineAt = reconcileIdleTimer(roomId, resumeLiveCount)`. `policy` variable kept for `expiresAt`. | Implemented | resume_session timer block is a single `reconcileIdleTimer` call. | `registerSocketHandlers.ts` resume_session |
+| CR15.4 | Collapse `leave_room` if/else timer block to one call | `registerSocketHandlers.ts` leave_room handler | Replace the CR11-14 if/else block (liveCount === 0 branch + liveCount > 0 branch) with `const deadline = reconcileIdleTimer(removed.roomId, liveCount); leaveExtras = deadline !== null ? { liveCount, soloDeadlineAt: deadline } : { liveCount }`. | Implemented | leave_room timer block is two lines; no inline `grace.restartSoloTimer`. | `registerSocketHandlers.ts` leave_room |
+| CR15.5 | Update disconnect and kick call sites | `registerSocketHandlers.ts` `emitPeerLeftOnDisconnect` (line ~272) and kick handler (line ~809) | Replace `restartSoloTimerIfSolo(...)` with `reconcileIdleTimer(...)`. | Implemented | Both call sites use `reconcileIdleTimer`; disconnect path now restarts timer fresh at `liveCount === 0` per lifecycle.md Rule 8. | `registerSocketHandlers.ts` |
+
+### Test Plan
+
+| Test # | Suite | Purpose | Verification Focus | Status |
+|--------|-------|---------|-------------------|--------|
+| T-CR15-01 | integration (existing) | All five paths still drive correct timer behavior after consolidation | All existing idle/solo timer tests (soloTimer.integration.test.ts, disconnect.integration.test.ts, kick.integration.test.ts) pass without modification — behavioral invariants unchanged for liveCount ≤ 1 restart and liveCount ≥ 2 cancel paths. | Pass |
+| T-CR15-02 | integration (new — backend) | Disconnect at liveCount → 0 now restarts timer fresh (spec alignment) | Host + Guest. Host disconnects (sentinel, solo timer starts). Guest disconnects (liveCount → 0). Assert: timer restarted fresh (delay = `IDLE_ROOM_TIMEOUT_MS` from guest-disconnect moment, not from host-disconnect moment). Room destroyed with `solo_timeout_expired` at fresh deadline. | Pass |

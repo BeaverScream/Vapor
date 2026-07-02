@@ -301,9 +301,9 @@ test('T3.3-04 (P3-AB-004): lifecycle edge case contract coverage — TTL expiry,
 
   // Solo-timeout: backend wires the solo host timer to destroy with solo_timeout_expired
   expectContains(handlers, '"solo_timeout_expired"', 'solo_timeout_expired reason used in solo-host timer callback')
-  expectContains(handlers, 'SOLO_ROOM_TIMEOUT_MS', 'SOLO_ROOM_TIMEOUT_MS used as solo timer duration in handler')
+  expectContains(handlers, 'IDLE_ROOM_TIMEOUT_MS', 'IDLE_ROOM_TIMEOUT_MS used as solo timer duration in handler')
   expectContains(sharedReasons, 'SOLO_TIMEOUT_EXPIRED: "solo_timeout_expired"', 'solo_timeout_expired reason declared in shared reasons')
-  expectContains(sharedPolicy, 'SOLO_ROOM_TIMEOUT_MS', 'Solo-host timeout constant present in shared policy')
+  expectContains(sharedPolicy, 'IDLE_ROOM_TIMEOUT_MS', 'Solo-host timeout constant present in shared policy')
 
   // Solo-timeout state: soloDeadlineAt is included in room_created payload so clients can show countdown
   expectContains(handlers, 'soloDeadlineAt: policy.soloDeadlineAt', 'soloDeadlineAt included in room_created payload')

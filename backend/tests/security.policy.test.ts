@@ -8,12 +8,7 @@ import {
   JOIN_RATE_LIMIT_WINDOW_MS,
   JOIN_RATE_LIMIT_MAX,
   CREATE_RATE_LIMIT_WINDOW_MS,
-  CREATE_RATE_LIMIT_MAX,
 } from "../src/signaling/contracts";
-import {
-  checkAndRecordCreateAttempt,
-  createRateLimitingContext,
-} from "../src/signaling/handlers/rateLimiting";
 
 const BACKEND_SRC_ROOT = path.resolve(process.cwd(), "src");
 const SIGNALING_CONTRACTS_FILE = path.resolve(process.cwd(), "src/signaling/contracts.ts");
@@ -202,7 +197,7 @@ test("T1.6-01: lifecycle uses grace + precedence primitives", async () => {
   expectContains(handlers, "HOST_DISCONNECT_GRACE_MS", "host grace timer constant usage");
   expectContains(handlers, "GUEST_DISCONNECT_GRACE_MS", "guest grace timer constant usage");
   expectContains(handlers, "ROOM_MAX_DURATION_MS", "room ttl constant usage");
-  expectContains(handlers, "SOLO_ROOM_TIMEOUT_MS", "solo timeout constant usage");
+  expectContains(handlers, "IDLE_ROOM_TIMEOUT_MS", "solo timeout constant usage");
 });
 
 // ---- Rate Limiting ----
@@ -388,7 +383,6 @@ test("T11.2-01: shared constants have exactly the spec-mandated values", () => {
   assert.equal(JOIN_RATE_LIMIT_WINDOW_MS, 60_000, "JOIN_RATE_LIMIT_WINDOW_MS must equal 60000 ms per spec §2");
   assert.equal(JOIN_RATE_LIMIT_MAX, 30, "JOIN_RATE_LIMIT_MAX must equal 30 per spec §2");
   assert.equal(CREATE_RATE_LIMIT_WINDOW_MS, 60_000, "CREATE_RATE_LIMIT_WINDOW_MS must equal 60000 ms per spec §2");
-  assert.equal(CREATE_RATE_LIMIT_MAX, 30, "CREATE_RATE_LIMIT_MAX must equal 30 per spec §2 (raised from 10 by VP-11.8)");
   // T11.2-04: derived sweep interval must equal 18000000 ms (5 hours)
   assert.equal(SWEEPER_INTERVAL_HOURS * 60 * 60 * 1000, 18_000_000, "Derived sweep interval must equal 18000000 ms");
 });
@@ -405,7 +399,6 @@ test("T11.2-02: replaced local constants fully removed from rateLimiting.ts", as
   expectContains(rateLimiting, "signaling.JOIN_RATE_LIMIT_WINDOW_MS", "join window sources from shared constant");
   expectContains(rateLimiting, "signaling.CREATE_RATE_LIMIT_WINDOW_MS", "create window sources from shared constant");
   expectContains(rateLimiting, "signaling.JOIN_RATE_LIMIT_MAX", "join threshold sources from shared constant");
-  expectContains(rateLimiting, "signaling.CREATE_RATE_LIMIT_MAX", "create threshold sources from shared constant");
 });
 
 // ---- VP-11.5 Nickname-Update Feature Removal ----
@@ -471,26 +464,9 @@ test("T11.5-01: all nickname-update symbols exhaustively removed from backend, s
 
 // ---- VP-11.8 Raise IP Create Rate Limit Threshold ----
 
-test("T11.8-01: CREATE_RATE_LIMIT_MAX constant equals 30", () => {
-  assert.equal(CREATE_RATE_LIMIT_MAX, 30, "CREATE_RATE_LIMIT_MAX must equal 30 per VP-11.8 (raised from legacy 10)");
-});
-
-test("T11.8-02: IP create block triggers at 31st attempt, not 11th", () => {
-  const ip = "192.168.1.100";
-  const windowStart = 0;
-  const nowTs = 1_000; // 1 second into the window — well within the 60-second window
-
-  // Part 1: 11th create from same IP must NOT be rate-limited.
-  // The old threshold was 10; under the new threshold of 30 the 11th attempt is still allowed.
-  const ctx1 = createRateLimitingContext();
-  ctx1.ipAbuseByIp.set(ip, { createCount: 10, joinCount: 0, windowStart });
-  const blocked11th = checkAndRecordCreateAttempt(ctx1, ip, nowTs);
-  assert.equal(blocked11th, false, "11th create from same IP must not be blocked (threshold is 30, not 10)");
-
-  // Part 2: 31st create from same IP within the window MUST be rate-limited.
-  // Pre-populate the context with 30 already-recorded creates so the next call is the 31st.
-  const ctx2 = createRateLimitingContext();
-  ctx2.ipAbuseByIp.set(ip, { createCount: 30, joinCount: 0, windowStart });
-  const blocked31st = checkAndRecordCreateAttempt(ctx2, ip, nowTs);
-  assert.equal(blocked31st, true, "31st create from same IP within 60s window must be rate limited");
-});
+/* SPEC-INVALID (CR11-18): CREATE_RATE_LIMIT_MAX removed — the IP ceiling (30) was unreachable
+   because the burst gate (CREATE_ROOM_BURST_THRESHOLD=5) always fires first. The effective
+   per-IP create ceiling is the burst limit; T3.3-03 covers the burst block end-to-end.
+test("T11.8-01: CREATE_RATE_LIMIT_MAX constant equals 30", () => { ... });
+test("T11.8-02: IP create block triggers at 31st attempt, not 11th", () => { ... });
+*/

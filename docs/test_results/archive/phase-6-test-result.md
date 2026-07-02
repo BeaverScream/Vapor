@@ -1,8 +1,6 @@
 # Phase 6 Test Evidence Matrix
 
 Date: 2026-06-11
-Owner: @vapor-pm / @qa-engineer
-Gate Decision: **⚠️ AUTOMATED GATE PASSED — Manual E2E complete with open defects (see §14)**
 
 ---
 

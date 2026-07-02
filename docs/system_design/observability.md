@@ -1,8 +1,6 @@
 # Vapor Observability (Admin Module) (Source of Truth)
 
-Date: 2026-06-29  
-Owner: @sys-architect  
-Status: Active
+Date: 2026-06-29
 
 Part of the Vapor system-design source-of-truth set — navigate via [INDEX.md](./INDEX.md). This file owns the operational observability policy: what aggregate metrics may be collected and the hard boundary against any user/session data. The admin code structure (metrics, routes, auth, analytics, scheduler, reports) is documented in [backend-overview.md](./backend-overview.md) §"Admin subsystem".
 

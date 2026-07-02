@@ -1,8 +1,6 @@
 # Code Review — Phase 10
 
-Date: 2026-06-25 (re-review)  
-Reviewer: Claude (automated, max-effort)  
-Scope: Working-tree diff against last commit (Phase 10 — bug fix & chat persistence: VP-10.1 guest disconnect `peer_left`, VP-10.2 mesh repair on peer-left, VP-10.3 timer/scroll UI, VP-10.4 chat history persistence)
+Date: 2026-06-25 (re-review)
 
 ---
 

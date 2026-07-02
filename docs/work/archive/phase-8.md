@@ -1,8 +1,6 @@
 # Phase 8 — Detailed Work Matrix
 
-Date: 2026-06-18  
-Owner: @vapor-pm  
-Status: In Progress
+Date: 2026-06-18
 
 **2026-06-21 — Full test run completed. 3 regressions found and fixed in `registerSocketHandlers.ts` (in-progress staged changes): REG-01 (T1.6-01 — `peer_left` for guest disconnect now emitted from `handleGuestGraceExpired` as designed, not immediately on disconnect), REG-02 (T8.2-04 — solo-timer restart removed from voluntary `leaveRoom` handler), REG-03 (T3.1-09 — race-condition block in `resume_session` removed). Dead code `emitPeerLeftToRoom` also removed. All 239 Phase 8 automated tests pass. See `docs/test_results/phase-8-test-result.md`.**
 

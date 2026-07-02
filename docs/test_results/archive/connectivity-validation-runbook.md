@@ -1,8 +1,6 @@
 # Connectivity Validation Runbook
 
 Date: 2026-03-19
-Owner: @fe-expert
-Scope: Phase 2 connectivity validation for private P2P chat reliability.
 
 ## Purpose
 

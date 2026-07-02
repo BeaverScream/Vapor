@@ -1,7 +1,6 @@
 # Vapor System Design Overview
 
-Date: 2026-06-22  
-Status: Active
+Date: 2026-06-22
 
 This document is the fast onboarding reference for how Vapor is structured end-to-end. Read this first before diving into any specific file.
 

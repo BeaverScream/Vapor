@@ -1,8 +1,6 @@
 # Vapor Lifecycle (Source of Truth)
 
-Date: 2026-06-29  
-Owner: @sys-architect  
-Status: Active
+Date: 2026-06-29
 
 Part of the Vapor system-design source-of-truth set — navigate via [INDEX.md](./INDEX.md). This file owns room lifecycle behavior: create/join/leave, disconnect grace, solo & empty-room timers, destruction reasons, `liveCount` semantics, reconnect, kick, abuse control, and room naming. Diagrams are co-located with the rules they depict. Constants are defined in [core-architecture.md](./core-architecture.md) §2; event payloads in [signaling-contract.md](./signaling-contract.md).
 
@@ -32,7 +30,7 @@ Part of the Vapor system-design source-of-truth set — navigate via [INDEX.md](
    - Broadcast `peer_joined` to all other live participants.
 7. **Room TTL expires**
    - Destroy room regardless of participant count with reason `room_ttl_expired`.
-8. **Solo / empty-room timeout** (the 15-min low-presence timer)
+8. **Idle / low-presence timeout** (`IDLE_ROOM_TIMEOUT_MS`, 15 min)
    - The timer applies to any lone live participant (host or guest) — it is not host-specific.
    - **Start/restart** (always cancel existing timer first) whenever `liveCount` becomes exactly 1 — including at room creation, when `liveCount` rises from 0 to 1 on reconnect or join, or when `liveCount` drops from higher to 1.
    - **Cancel** whenever `liveCount` rises to ≥ 2.
@@ -68,12 +66,12 @@ This ensures other participants see an accurate real-time view of who is current
 
 A room reaches `liveCount === 0` when the last live participant disconnects, or when the last live guest explicitly leaves while the host is already disconnected/in grace. (Host explicit leave never reaches this state — it destroys the room immediately with `host_left`.)
 
-- Start the 15-min empty-room timer (cancelling any running solo timer first). Individual grace windows — including the 60-min host grace, when applicable — continue running in parallel; the earliest active deadline wins.
-- If any participant returns before the timer fires (`liveCount` rises to ≥ 1 via `resume_session` or a new `join_room`), cancel the empty-room timer and restart the solo timer per §1 Rule 8 if `liveCount` = 1.
+- Start the 15-min empty-room timer (cancelling any running idle timer first). Individual grace windows — including the 60-min host grace, when applicable — continue running in parallel; the earliest active deadline wins.
+- If any participant returns before the timer fires (`liveCount` rises to ≥ 1 via `resume_session` or a new `join_room`), cancel the empty-room timer and restart the idle timer per §1 Rule 8 if `liveCount` = 1.
 - If the timer fires with no return, destroy the room with reason `solo_timeout_expired`.
 
 ### `join_room` when `liveCount === 0`
-- A new `join_room` is permitted when `liveCount === 0`. The joiner becomes the sole live participant, the empty-room timer is cancelled, and the solo timer starts (`liveCount === 1`).
+- A new `join_room` is permitted when `liveCount === 0`. The joiner becomes the sole live participant, the empty-room timer is cancelled, and the idle timer starts (`liveCount === 1`).
 - `resume_session` likewise lifts `liveCount` from 0 to ≥ 1 and is always permitted within its grace window.
 
 ### Peer visibility broadcasts
@@ -82,7 +80,7 @@ A room reaches `liveCount === 0` when the last live participant disconnects, or 
 - **On kick**: server removes kicked socket first, then broadcasts `participant_kicked` to remaining live participants; `peer_left` (reason: `"kick"`) also broadcast to remaining live participants. The kicked socket receives `participant_kicked` only — not `peer_left`.
 - **On host disconnect**: `host_reconnect_grace` additionally broadcast alongside `peer_left`.
 - **On reconnect** (`resume_session` success): `session_resumed` to the reconnecting socket; `peer_joined` broadcast to all other live participants.
-- **When solo timer (re)starts**: `soloDeadlineAt` included in the triggering `peer_left` payload (or in `room_created` for the initial creation timer).
+- **When idle timer (re)starts**: `soloDeadlineAt` included in the triggering `peer_left` payload (or in `room_created` for the initial creation timer).
 
 ### Frontend timer display
 Frontend derives `effectiveExpiresAt = min(expiresAt, hostReconnectGraceDeadlineAt, soloDeadlineAt)` (filtering nulls) and displays a single countdown. Only the shortest active deadline is shown.
@@ -93,9 +91,9 @@ Frontend derives `effectiveExpiresAt = min(expiresAt, hostReconnectGraceDeadline
 - `sessionStorage` is explicitly cleared on voluntary leave, room destruction, or participant kick.
 - React 18 StrictMode double-invokes effects; `clearStoredReconnectSession` must **not** be called inside the cleanup of the initial mount effect to avoid wiping the token before the second-mount reconnect attempt.
 
-### Solo timer state machine
+### Idle timer state machine
 
-The solo timer governs rooms where at most one live participant remains. A participant counts as **live** only while their socket is connected; a disconnected participant still inside their reconnect grace window counts as 0. States: **Solo** (1 live, timer running), **Active** (≥2 live, timer cancelled), **Empty** (0 live, all within grace), **Destroyed** (terminal).
+The idle timer governs rooms where at most one live participant remains. A participant counts as **live** only while their socket is connected; a disconnected participant still inside their reconnect grace window counts as 0. States: **Solo** (1 live, timer running), **Active** (≥2 live, timer cancelled), **Empty** (0 live, all within grace), **Destroyed** (terminal).
 
 ```mermaid
 stateDiagram-v2
@@ -119,7 +117,7 @@ stateDiagram-v2
 ## 4) Room Cleanup, Destruction, and Reasoning
 
 1. Keep a hard room TTL of 2 hours for all rooms.
-2. If `liveCount` drops to 1, destroy after `SOLO_ROOM_TIMEOUT_MS` unless it rises to ≥ 2 first.
+2. If `liveCount` drops to 1, destroy after `IDLE_ROOM_TIMEOUT_MS` unless it rises to ≥ 2 first.
 3. Enforce host-sovereign cleanup exactly as lifecycle rules specify.
 4. Run a periodic sweeper to prune already-expired rooms and stale in-memory structures; the sweep interval should be configurable, coarse enough to avoid unnecessary churn, and expressed as an hour-based cadence rather than a sub-minute timer.
 5. Under memory pressure, prioritize preserving active rooms and reject new `create_room` requests with `RATE_LIMITED`.

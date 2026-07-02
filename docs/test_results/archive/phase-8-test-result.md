@@ -1,8 +1,6 @@
 # Phase 8 Test Evidence Matrix
 
 Date: 2026-06-22
-Owner: @vapor-pm / @qa-engineer
-Gate Decision: **✅ PHASE 8 GATE PASSED — 3 regressions found and fixed; 8 pre-existing contract regressions from Phase 5 refactoring documented; all manual E2E rows verified**
 
 ---
 

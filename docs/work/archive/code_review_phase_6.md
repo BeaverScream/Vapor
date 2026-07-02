@@ -1,8 +1,6 @@
 # Phase 6 Code Review
 
 Date: 2026-06-11
-Reviewer: Claude (claude-sonnet-4-6)
-Scope: phase-6.md spec fidelity, implementation correctness, test coverage gaps, security, and deferred-risk assessment.
 
 **Disposition reviewed with owner: 2026-06-11**
 All findings reviewed and actioned — see resolution notes under each section and the [Disposition Summary](#disposition-summary) table at the end.
@@ -223,9 +221,6 @@ The test verifies "Bearer failure does not fall through to Basic." But a single 
 # Round 2 — Post-Patch Verification Review
 
 Date: 2026-06-11
-Reviewer: Claude (Fable 5)
-Scope: Verification of the 2026-06-11 defect patches, full re-review of all Phase 6 backend modules (`backend/src/admin/*`, `server.ts`, `index.ts`, `registerSocketHandlers.ts`), all admin test suites (`admin.unit.test.ts`, `admin.integration.test.ts`, T6.1 sections of `socket.integration.test.ts`), and the frontend admin feature (`frontend/src/features/admin/*`, `vite.config.ts`, `vite-env.d.ts`, `App.tsx`, `docker-compose.yml`).
-Method: Source reading plus `tsc --noEmit` compile verification (build verification only — no test suites were executed, per project guardrail).
 
 ## R2.0 Patch Verification Results (Round 1 fixes)
 

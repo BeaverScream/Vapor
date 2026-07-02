@@ -5,7 +5,6 @@ const CREATE_ROOM_BURST_THRESHOLD = 5;
 const CREATE_ROOM_BLOCK_DURATION_MS = 10 * 60 * 1000;
 
 type IpAbuseRecord = {
-  createCount: number;
   joinCount: number;
   windowStart: number;
 };
@@ -24,6 +23,8 @@ export function createRateLimitingContext(): RateLimitingContext {
   };
 }
 
+// IP-only keying is intentional (VP-11.2): behind a NAT or reverse-proxy all
+// clients share one bucket; configure X-Forwarded-For extraction in production.
 export function deriveIp(socket: Socket): string {
   const socketLike = socket as Socket & { handshake?: { address?: string } };
   return socketLike.handshake?.address ?? "unknown-ip";
@@ -36,14 +37,6 @@ export function checkAndRecordCreateAttempt(
 ): boolean {
   const blockedUntil = ctx.temporaryBlocklistByIp.get(ip);
   if (blockedUntil && nowTs < blockedUntil) return true;
-
-  let ipRecord = ctx.ipAbuseByIp.get(ip);
-  if (!ipRecord || nowTs - ipRecord.windowStart > signaling.JOIN_RATE_LIMIT_WINDOW_MS) {
-    ipRecord = { createCount: 0, joinCount: 0, windowStart: nowTs };
-    ctx.ipAbuseByIp.set(ip, ipRecord);
-  }
-  ipRecord.createCount += 1;
-  if (ipRecord.createCount > signaling.CREATE_RATE_LIMIT_MAX) return true;
 
   const prev = ctx.createAttemptsByIp.get(ip);
   if (!prev || nowTs - prev.firstAt > signaling.CREATE_RATE_LIMIT_WINDOW_MS) {
@@ -68,7 +61,7 @@ export function checkAndRecordJoinIp(
 ): boolean {
   let ipRecord = ctx.ipAbuseByIp.get(ip);
   if (!ipRecord || nowTs - ipRecord.windowStart > signaling.JOIN_RATE_LIMIT_WINDOW_MS) {
-    ipRecord = { createCount: 0, joinCount: 0, windowStart: nowTs };
+    ipRecord = { joinCount: 0, windowStart: nowTs };
     ctx.ipAbuseByIp.set(ip, ipRecord);
   }
   ipRecord.joinCount += 1;

@@ -1,8 +1,6 @@
 # Vapor Core Architecture (Source of Truth)
 
-Date: 2026-06-29  
-Owner: @sys-architect  
-Status: Active
+Date: 2026-06-29
 
 Part of the Vapor system-design source-of-truth set — navigate via [INDEX.md](./INDEX.md). This file owns the non-negotiable principles, storage boundaries, system constants, RAM-only state model, and password/nickname rules. Behavioral lifecycle, the wire protocol, file transfer, error codes, and observability live in sibling normative docs: [lifecycle.md](./lifecycle.md), [signaling-contract.md](./signaling-contract.md), [file-transfer.md](./file-transfer.md), [error-codes.md](./error-codes.md), [observability.md](./observability.md).
 
@@ -42,7 +40,7 @@ This preserves ephemeral architecture while improving UX for accidental disconne
 ```ts
 export const SIGNALING_CONST = {
   MAX_PARTICIPANTS_PER_ROOM: 5,
-  SOLO_ROOM_TIMEOUT_MS: 15 * 60 * 1000,
+  IDLE_ROOM_TIMEOUT_MS: 15 * 60 * 1000,
   ROOM_MAX_DURATION_MS: 2 * 60 * 60 * 1000,
   HOST_DISCONNECT_GRACE_MS: 60 * 60 * 1000,
   GUEST_DISCONNECT_GRACE_MS: 30 * 60 * 1000,
@@ -52,7 +50,6 @@ export const SIGNALING_CONST = {
   JOIN_RATE_LIMIT_WINDOW_MS: 60_000,
   JOIN_RATE_LIMIT_MAX: 30,
   CREATE_RATE_LIMIT_WINDOW_MS: 60_000,
-  CREATE_RATE_LIMIT_MAX: 30,
   FILE_TRANSFER_MAX_SIZE_BYTES: 2 * 1024 * 1024 * 1024,  // 2 GB hard limit
   FILE_TRANSFER_CHUNK_SIZE_BYTES: 64 * 1024,              // 64 KB per chunk
   FILE_OFFER_TIMEOUT_MS: 60_000,                          // 60 s offer window

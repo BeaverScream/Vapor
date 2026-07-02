@@ -1,8 +1,6 @@
 # Phase 7 Code Review
 
 Date: 2026-06-17 (current state; supersedes the 2026-06-16 first pass)
-Reviewer: Claude (claude-opus-4-8)
-Scope: phase-7.md spec fidelity for VP-7.1 (Stitch UI redesign + mobile-frame rework), VP-7.2 (Light/Dark/Blue theme system), and VP-7.3 (info-page restructure). Focus on token discipline (D-5), zero-persistence/contract freeze (D-6), per-theme accessibility, the **T7.1-08 a11y code review** (focus-ring `--ring` application + `aria-pressed`/`aria-expanded`/`aria-live` presence in source), behavior preservation (D-2), and build/lint health.
 
 Verification:
 - `npm run build` (frontend) — **green** (tsc -b + vite build, 1014 modules, 887 kB / 270 kB gzip).
