@@ -93,16 +93,6 @@ export type RoomJoinedPayload = {
   roomName?: string;
 };
 
-export type NicknameUpdatePayload = {
-  roomId?: string;
-  nickname?: string;
-};
-
-export type NicknameUpdatedPayload = {
-  participantId: string;
-  nickname: string;
-};
-
 export type PeerJoinedPayload = {
   participantId: string;
   nickname?: string | null;
@@ -111,7 +101,7 @@ export type PeerJoinedPayload = {
 
 export type PeerLeftPayload = {
   participantId: string;
-  reason: "disconnect" | "leave";
+  reason: "disconnect" | "leave" | "kick";
   participantCount: number;
   soloDeadlineAt?: number | null;
 };

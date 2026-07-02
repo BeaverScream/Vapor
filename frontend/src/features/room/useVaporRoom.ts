@@ -19,7 +19,6 @@ import {
   withLobbySubmitting,
   withJoinRateLimited,
   withNicknameInput,
-  withNicknameUpdated,
   withParticipantKicked,
   withPasswordInput,
   withPeerJoined,
@@ -36,7 +35,6 @@ import type {
   ChatConnectionState,
   HostReconnectGracePayload,
   LobbyMode,
-  NicknameUpdatedPayload,
   ParticipantKickedPayload,
   PeerJoinedPayload,
   PeerLeftPayload,
@@ -303,13 +301,9 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       })
       const peerMesh = createPeerMesh(payload.roomId, payload.participantId)
       peerMesh.syncPeers(payload.peers.map((peer) => peer.participantId))
-      const socket = socketRef.current
-      if (socket) {
-        socket.onNicknameUpdated(onNicknameUpdated)
-      }
       requestPermission()
     },
-    // resumeInFlightRef / autoResumeRequestedRef are stable React refs; onNicknameUpdated closure is stable
+    // resumeInFlightRef / autoResumeRequestedRef are stable React refs, not reactive deps — do not add them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [createPeerMesh, requestPermission],
   )
@@ -353,7 +347,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     }
     setState((previous) => {
       const name = previous.participantNicknames[payload.participantId] ?? payload.participantId.slice(0, 8)
-      const action = payload.reason === 'disconnect' ? 'disconnected' : 'left'
+      const action = payload.reason === 'disconnect' ? 'disconnected' : payload.reason === 'kick' ? 'was removed' : 'left'
       let nextState = withAppendedChatMessage(withPeerLeft(previous, payload), createChatMessage(payload.participantId, `${name} ${action}`, 'system'))
       if (payload.soloDeadlineAt !== undefined && payload.soloDeadlineAt !== null) {
         nextState = { ...nextState, soloDeadlineAt: payload.soloDeadlineAt }
@@ -391,21 +385,6 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     },
     [],
   )
-
-  const onNicknameUpdated = useCallback((payload: NicknameUpdatedPayload): void => {
-    setState((previous) => {
-      const isLocalUser = previous.participantId === payload.participantId
-      const oldName = previous.participantNicknames[payload.participantId] ?? payload.participantId
-      const actor = isLocalUser ? 'You' : oldName
-      const verb = isLocalUser ? 'your' : 'their'
-      const systemMessage = createChatMessage(
-        payload.participantId,
-        `${actor} changed ${verb} name to "${payload.nickname}"`,
-        'system',
-      )
-      return withAppendedChatMessage(withNicknameUpdated(previous, payload), systemMessage)
-    })
-  }, [])
 
   const onParticipantKicked = useCallback(
     (payload: ParticipantKickedPayload): void => {
@@ -470,10 +449,22 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
         if (
           errorCode === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND ||
           errorCode === SIGNALING_ERROR_CODES.INVALID_PASSWORD ||
-          errorCode === SIGNALING_ERROR_CODES.RATE_LIMITED
+          errorCode === SIGNALING_ERROR_CODES.RATE_LIMITED ||
+          errorCode === SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE ||
+          errorCode === SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED
         ) {
           return resetToLobby(previous)
         }
+      }
+
+      // Defensive: if the reconnecting screen is still active but autoResumeRequestedRef
+      // was false (e.g. due to StrictMode double-mount effect timing clearing the ref
+      // before the error arrives), any error response should still return to lobby rather
+      // than leaving the user stuck on the spinner forever.
+      if (previous.screen === 'reconnecting') {
+        clearChatHistory(previous.activeRoomId)
+        persistence.clearStoredReconnectSession()
+        return resetToLobby(previous)
       }
 
       if (errorCode === SIGNALING_ERROR_CODES.RATE_LIMITED && previous.lobbyMode === 'join') {
@@ -514,7 +505,6 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       onSignalOffer,
       onSignalAnswer,
       onSignalIce,
-      onNicknameUpdated,
       onParticipantKicked,
       onHostReconnectGrace,
       onRoomDestroyed,

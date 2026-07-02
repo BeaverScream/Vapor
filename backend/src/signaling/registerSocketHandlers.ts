@@ -18,8 +18,6 @@ import type {
   RoomJoinedPayload,
   RoomPasswordUpdatePayload,
   RoomPasswordUpdatedPayload,
-  NicknameUpdatePayload,
-  NicknameUpdatedPayload,
 } from "./contracts";
 import type { SignalingState } from "./state";
 import {
@@ -51,7 +49,7 @@ type MetricsAdapter = {
   updatePeakMarks?: () => void;
 };
 
-const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 60 * 1000;
+const DEFAULT_SWEEP_INTERVAL_MS = signaling.SWEEPER_INTERVAL_HOURS * 60 * 60 * 1000;
 
 type RegisterSocketHandlersArgs = {
   io: Server;
@@ -129,9 +127,9 @@ export function registerSocketHandlers({
   const authCtx = passwordAuth.createPasswordAuthContext();
   const rateLimitCtx = providedRateLimitCtx ?? rateLimiting.createRateLimitingContext();
   // Test-only escape hatch: the E2E harness drives many room creates from a single
-  // subject (shared IP/UA, no fingerprint), which legitimately trips the create-burst
-  // and per-IP thresholds. Set E2E_DISABLE_RATE_LIMIT=1 (Playwright webServer only) to
-  // bypass the gates. Never set in production — the flag is unset by default.
+  // shared IP, which legitimately trips the create-burst and per-IP thresholds.
+  // Set E2E_DISABLE_RATE_LIMIT=1 (Playwright webServer only) to bypass the gates.
+  // Never set in production — the flag is unset by default.
   const rateLimitingDisabled = process.env.E2E_DISABLE_RATE_LIMIT === "1";
   const reconnectCtx = reconnect.createReconnectContext();
   const graceCtx = grace.createGraceWindowContext();
@@ -200,7 +198,6 @@ export function registerSocketHandlers({
     const policy = graceCtx.roomPolicyById.get(roomId);
     if (policy) grace.clearRoomPolicyTimers(policy);
     graceCtx.roomPolicyById.delete(roomId);
-    rateLimiting.purgeJoinAttemptsForRoom(rateLimitCtx, roomId);
     clearReconnectForRoomFn(roomId);
     roomLockChains.delete(roomId);
   };
@@ -239,7 +236,6 @@ export function registerSocketHandlers({
     clearReconnectForRoomFn(roomId);
     passwordAuth.deleteRoomAuth(authCtx, roomId);
     graceCtx.roomPolicyById.delete(roomId);
-    rateLimiting.purgeJoinAttemptsForRoom(rateLimitCtx, roomId);
     roomLockChains.delete(roomId);
     state.rooms.delete(roomId);
 
@@ -257,7 +253,7 @@ export function registerSocketHandlers({
     if (!policy) return null;
     return grace.restartSoloTimer(
       policy,
-      signaling.SOLO_HOST_ROOM_TIMEOUT_MS,
+      signaling.SOLO_ROOM_TIMEOUT_MS,
       now,
       () => destroyRoom(roomId, "solo_timeout_expired"),
     );
@@ -306,37 +302,13 @@ export function registerSocketHandlers({
     state.participantToRoom.delete(participantId);
     clearReconnectForParticipantFn(participantId);
 
-    const participantCount = activeRoom.participants.size;
-    if (participantCount === 0) {
-      const nowTs = now();
-      metrics.incrementRoomDestroyed?.("host_grace_expired");
-      metrics.updateRoomLifetimeRolling?.(nowTs - activeRoom.createdAt);
-      // clearRoomArtifacts reads room.roomName from state.rooms, so it must run
-      // before the room is deleted or the roomNameToId cleanup is skipped.
-      clearRoomArtifacts(roomId);
-      state.rooms.delete(roomId);
-      return;
-    }
     // The guest's departure was already announced via peer_left at disconnect
-    // (VP-10.1). Grace expiry is now purely server-side Map/nickname cleanup;
-    // re-emitting here would duplicate the system message and recompute the
-    // count from participants.size (which still includes other guests in grace).
+    // (VP-10.1). Grace expiry is purely server-side Map/nickname cleanup; the
+    // solo timer owns empty-room destruction (liveCount=0 → 15 min → destroyRoom).
   };
 
   io.on("connection", (socket) => {
     metrics.recordConnection(socket.id);
-
-    socket.on("heartbeat", () => {
-      const participantId = state.socketToParticipant.get(socket.id);
-      if (!participantId) return;
-      const roomId = state.participantToRoom.get(participantId);
-      if (!roomId) return;
-      const room = state.rooms.get(roomId);
-      if (!room) return;
-      const participant = room.participants.get(participantId);
-      if (!participant) return;
-      participant.lastSeenAt = now();
-    });
 
     socket.on(
       signaling.CLIENT_EVENTS.createRoom,
@@ -366,11 +338,10 @@ export function registerSocketHandlers({
           normalizedRoomName = validated;
         }
 
-        const subject = rateLimiting.deriveJoinAttemptSubject(socket);
         const ip = rateLimiting.deriveIp(socket);
         const createdAt = now();
 
-        if (!rateLimitingDisabled && rateLimiting.checkAndRecordCreateAttempt(rateLimitCtx, subject, ip, createdAt)) {
+        if (!rateLimitingDisabled && rateLimiting.checkAndRecordCreateAttempt(rateLimitCtx, ip, createdAt)) {
           emitRateLimited(socket);
           return;
         }
@@ -385,7 +356,6 @@ export function registerSocketHandlers({
         const participant = room.participants.get(participantId);
         if (participant) {
           participant.nickname = normalizedNickname;
-          participant.nicknameUpdatedAt = createdAt;
           room.nicknameToParticipant.set(normalizedNickname.toLowerCase(), participantId);
         }
 
@@ -396,7 +366,7 @@ export function registerSocketHandlers({
           room.roomId,
           createdAt,
           signaling.ROOM_MAX_DURATION_MS,
-          signaling.SOLO_HOST_ROOM_TIMEOUT_MS,
+          signaling.SOLO_ROOM_TIMEOUT_MS,
           () => destroyRoom(room.roomId, "room_ttl_expired"),
           () => destroyRoom(room.roomId, "solo_timeout_expired"),
         );
@@ -444,29 +414,13 @@ export function registerSocketHandlers({
           return;
         }
 
-        // Room exists but all live participants have disconnected — treat as non-existent.
-        if (getLiveParticipantCount(room) === 0) {
-          emitRoomNotFound(socket);
-          return;
-        }
-
         if (typeof payload?.password === "string" && payload.password !== "" && payload.password.trim() === "") {
           emitInvalidPassword(socket);
           return;
         }
 
         const normalizedPassword = passwordAuth.normalizePassword(payload?.password);
-        const subject = rateLimiting.deriveJoinAttemptSubject(socket);
         const attemptTimestamp = now();
-
-        if (
-          !rateLimitingDisabled &&
-          rateLimiting.getJoinAttemptStatus(rateLimitCtx, roomId, subject, attemptTimestamp) === "rate_limited"
-        ) {
-          emitRateLimited(socket);
-          return;
-        }
-
         const ip = rateLimiting.deriveIp(socket);
         if (!rateLimitingDisabled && rateLimiting.checkAndRecordJoinIp(rateLimitCtx, ip, attemptTimestamp)) {
           emitRateLimited(socket);
@@ -481,21 +435,12 @@ export function registerSocketHandlers({
 
         const existing = room.nicknameToParticipant.get(normalizedNickname.toLowerCase());
         if (existing) {
-          const existingParticipant = room.participants.get(existing);
-          const isDisconnected = existingParticipant?.socketId.startsWith("disconnected:") ?? false;
-          if (!isDisconnected) {
-            emitInvalidSignalPayload(socket);
-            return;
-          }
-          // The existing holder is in a disconnect grace window. Evict them so this
-          // fresh join can claim the nickname (the holder lost their reconnect token
-          // on page refresh and cannot resume).
-          // peer_left was already broadcast at disconnect time; only clean up server state
-          room.nicknameToParticipant.delete(normalizedNickname.toLowerCase());
-          room.participants.delete(existing);
-          state.participantToRoom.delete(existing);
-          clearReconnectForParticipantFn(existing);
-          reconnectCtx.disconnectedParticipants.delete(existing);
+          // Nickname reservations remain held during active grace windows (lifecycle.md
+          // §1 Rule 6): a reserved nickname cannot be claimed by a new joiner whether the
+          // holder is live or in a disconnect grace window. Reject the colliding join; the
+          // original holder reclaims the nickname on resume_session.
+          emitInvalidSignalPayload(socket);
+          return;
         }
 
         const auth = passwordAuth.getRoomAuth(authCtx, roomId);
@@ -507,17 +452,10 @@ export function registerSocketHandlers({
         const isOpenRoom = !auth.passwordHash;
         if (!isOpenRoom) {
           if (!normalizedPassword || !passwordAuth.verifyPassword(normalizedPassword, auth)) {
-            const outcome = rateLimiting.recordInvalidPasswordAttempt(rateLimitCtx, roomId, subject, attemptTimestamp);
-            if (outcome === "emit_invalid_password") {
-              emitInvalidPassword(socket);
-            } else {
-              emitRateLimited(socket);
-            }
+            emitInvalidPassword(socket);
             return;
           }
         }
-
-        rateLimiting.clearSuccessfulJoinAttempt(rateLimitCtx, roomId, subject);
 
         if (room.participants.size >= signaling.MAX_PARTICIPANTS_PER_ROOM) {
           emitRoomFull(socket);
@@ -540,14 +478,24 @@ export function registerSocketHandlers({
         const joinedParticipant = joined.room.participants.get(joined.participantId);
         if (joinedParticipant) {
           joinedParticipant.nickname = normalizedNickname;
-          joinedParticipant.nicknameUpdatedAt = now();
           joined.room.nicknameToParticipant.set(normalizedNickname.toLowerCase(), joined.participantId);
         }
 
+        const joinLiveCount = getLiveParticipantCount(joined.room);
         const policy = graceCtx.roomPolicyById.get(roomId);
+        let joinSoloDeadlineAt: number | null = null;
         if (policy) {
           if (!policy.hasEverHadGuest) policy.hasEverHadGuest = true;
-          if (policy.soloTimeoutRef) {
+          if (joinLiveCount === 1) {
+            // Joining into an empty room (liveCount was 0): cancel the empty-room timer and
+            // start a fresh solo timer for this sole live participant.
+            joinSoloDeadlineAt = grace.restartSoloTimer(
+              policy,
+              signaling.SOLO_ROOM_TIMEOUT_MS,
+              now,
+              () => destroyRoom(roomId, "solo_timeout_expired"),
+            );
+          } else if (policy.soloTimeoutRef) {
             clearTimeout(policy.soloTimeoutRef);
             policy.soloTimeoutRef = undefined;
             policy.soloDeadlineAt = undefined;
@@ -559,7 +507,6 @@ export function registerSocketHandlers({
         metrics.incrementParticipantsJoined?.();
         metrics.updatePeakMarks?.();
 
-        const joinLiveCount = getLiveParticipantCount(joined.room);
         const roomJoinedPayload: RoomJoinedPayload = {
           roomId,
           participantId: joined.participantId,
@@ -571,6 +518,7 @@ export function registerSocketHandlers({
           participantCount: joinLiveCount,
           hasPassword: !isOpenRoom,
           roomName: room.roomName,
+          ...(joinSoloDeadlineAt !== null ? { soloDeadlineAt: joinSoloDeadlineAt } : {}),
         };
 
         socket.emit(signaling.SERVER_EVENTS.roomJoined, roomJoinedPayload);
@@ -590,7 +538,8 @@ export function registerSocketHandlers({
       (payload: SignalOfferPayload | undefined) => {
         relay.handleSignalOffer(socket, payload, state, io,
           () => emitRoomNotFound(socket),
-          () => emitInvalidSignalPayload(socket));
+          () => emitInvalidSignalPayload(socket),
+          now);
       },
     );
 
@@ -599,7 +548,8 @@ export function registerSocketHandlers({
       (payload: SignalAnswerPayload | undefined) => {
         relay.handleSignalAnswer(socket, payload, state, io,
           () => emitRoomNotFound(socket),
-          () => emitInvalidSignalPayload(socket));
+          () => emitInvalidSignalPayload(socket),
+          now);
       },
     );
 
@@ -608,7 +558,8 @@ export function registerSocketHandlers({
       (payload: SignalIcePayload | undefined) => {
         relay.handleSignalIce(socket, payload, state, io,
           () => emitRoomNotFound(socket),
-          () => emitInvalidSignalPayload(socket));
+          () => emitInvalidSignalPayload(socket),
+          now);
       },
     );
 
@@ -682,21 +633,22 @@ export function registerSocketHandlers({
 
           const resumeLiveCount = getLiveParticipantCount(room);
           const policy = graceCtx.roomPolicyById.get(roomId);
-          // Solo-host policy is host-only. A guest resuming as the sole live participant
-          // must not reset the deadline or be handed a soloDeadlineAt it doesn't own.
-          const isHostResuming = room.hostId === reconnectRecord.participantId;
+          // Empty-room/solo timer is participant-agnostic (lifecycle.md §1 Rule 8, §3):
+          // whoever returns as the sole live participant — host OR guest — restarts the
+          // solo timer and receives soloDeadlineAt. Mirrors the join_room empty-room path.
+          let resumeSoloDeadlineAt: number | null = null;
           if (policy) {
-            if (resumeLiveCount >= 2) {
-              clearTimeout(policy.soloTimeoutRef);
-              policy.soloTimeoutRef = undefined;
-              policy.soloDeadlineAt = undefined;
-            } else if (resumeLiveCount === 1 && isHostResuming) {
-              grace.restartSoloTimer(
+            if (resumeLiveCount === 1) {
+              resumeSoloDeadlineAt = grace.restartSoloTimer(
                 policy,
-                signaling.SOLO_HOST_ROOM_TIMEOUT_MS,
+                signaling.SOLO_ROOM_TIMEOUT_MS,
                 now,
                 () => destroyRoom(roomId, "solo_timeout_expired"),
               );
+            } else if (policy.soloTimeoutRef) {
+              clearTimeout(policy.soloTimeoutRef);
+              policy.soloTimeoutRef = undefined;
+              policy.soloDeadlineAt = undefined;
             }
           }
           const roomJoinedPayload: RoomJoinedPayload = {
@@ -710,7 +662,7 @@ export function registerSocketHandlers({
             participantCount: resumeLiveCount,
             hasPassword: !!auth.passwordHash,
             roomName: room.roomName,
-            soloDeadlineAt: isHostResuming ? (policy?.soloDeadlineAt ?? null) : null,
+            ...(resumeSoloDeadlineAt !== null ? { soloDeadlineAt: resumeSoloDeadlineAt } : {}),
           };
 
           socket.emit(signaling.SERVER_EVENTS.roomJoined, roomJoinedPayload);
@@ -773,67 +725,6 @@ export function registerSocketHandlers({
 
           socket.emit(signaling.SERVER_EVENTS.roomPasswordUpdated, updatePayload);
           socket.to(roomId).emit(signaling.SERVER_EVENTS.roomPasswordUpdated, updatePayload);
-        });
-      },
-    );
-
-    socket.on(
-      signaling.CLIENT_EVENTS.nicknameUpdate,
-      async (payload: NicknameUpdatePayload | undefined) => {
-        const participantId = state.socketToParticipant.get(socket.id);
-        if (!participantId) {
-          emitRoomNotFound(socket);
-          return;
-        }
-
-        const roomId = state.participantToRoom.get(participantId);
-        if (!roomId) {
-          emitRoomNotFound(socket);
-          return;
-        }
-
-        const normalizedNickname = normalizeNickname(payload?.nickname);
-        if (!normalizedNickname) {
-          emitInvalidSignalPayload(socket);
-          return;
-        }
-
-        await withRoomLock(roomId, () => {
-          const room = state.rooms.get(roomId);
-          if (!room) {
-            emitRoomNotFound(socket);
-            return;
-          }
-
-          const participant = room.participants.get(participantId);
-          if (!participant) {
-            emitRoomNotFound(socket);
-            return;
-          }
-
-          const nowTs = now();
-          const cooldown = signaling.NICKNAME_CHANGE_COOLDOWN_MS;
-          if (participant.nicknameUpdatedAt && nowTs < participant.nicknameUpdatedAt + cooldown) {
-            emitRateLimited(socket);
-            return;
-          }
-
-          const key = normalizedNickname.toLowerCase();
-          const existingHolder = room.nicknameToParticipant.get(key);
-          if (existingHolder && existingHolder !== participantId) {
-            emitInvalidSignalPayload(socket);
-            return;
-          }
-
-          if (participant.nickname) {
-            room.nicknameToParticipant.delete(participant.nickname.toLowerCase());
-          }
-          participant.nickname = normalizedNickname;
-          participant.nicknameUpdatedAt = nowTs;
-          room.nicknameToParticipant.set(key, participantId);
-
-          const updatePayload: NicknameUpdatedPayload = { participantId, nickname: normalizedNickname };
-          io.to(roomId).emit(signaling.SERVER_EVENTS.nicknameUpdated, updatePayload);
         });
       },
     );
@@ -903,23 +794,27 @@ export function registerSocketHandlers({
 
         clearReconnectForParticipantFn(targetParticipantId);
 
+        if (!targetSocketId.startsWith("disconnected:")) {
+          const ioServer = io as unknown as {
+            sockets: {
+              sockets: Map<string, { leave: (room: string) => void; disconnect: (close?: boolean) => void }>;
+            };
+          };
+          const targetSocket = ioServer.sockets?.sockets?.get(targetSocketId);
+          targetSocket?.leave(roomId);
+          targetSocket?.disconnect(true);
+        }
+
         const remainingCount = getLiveParticipantCount(room);
         const soloDeadlineAt = restartSoloTimerIfSolo(roomId, remainingCount);
 
         const peerLeftPayload: PeerLeftPayload = {
           participantId: targetParticipantId,
-          reason: "leave",
+          reason: "kick",
           participantCount: remainingCount,
           ...(soloDeadlineAt !== null ? { soloDeadlineAt } : {}),
         };
         io.to(roomId).emit(signaling.SERVER_EVENTS.peerLeft, peerLeftPayload);
-
-        if (!targetSocketId.startsWith("disconnected:")) {
-          const ioServer = io as unknown as {
-            sockets: { sockets: Map<string, { disconnect: (close?: boolean) => void }> };
-          };
-          ioServer.sockets?.sockets?.get(targetSocketId)?.disconnect(true);
-        }
       },
     );
 

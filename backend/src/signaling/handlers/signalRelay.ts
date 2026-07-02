@@ -65,6 +65,7 @@ export function resolveSignalRoute(
   payload: SignalPayloadBase | undefined,
   state: SignalingState,
   emitNotFound: () => void,
+  now: () => number,
 ): SignalRoute | null {
   const roomId = payload?.roomId;
   const toParticipantId = payload?.toParticipantId;
@@ -92,6 +93,7 @@ export function resolveSignalRoute(
     return null;
   }
 
+  room.participants.get(fromParticipantId)!.lastSeenAt = now();
   return {
     roomId: roomId as string,
     fromParticipantId,
@@ -106,8 +108,9 @@ export function handleSignalOffer(
   io: Server,
   emitNotFound: () => void,
   emitInvalidPayload: () => void,
+  now: () => number,
 ): void {
-  const route = resolveSignalRoute(socket, payload, state, emitNotFound);
+  const route = resolveSignalRoute(socket, payload, state, emitNotFound, now);
   if (!route) return;
 
   const sdp = normalizeSignalSdp(payload?.sdp);
@@ -132,8 +135,9 @@ export function handleSignalAnswer(
   io: Server,
   emitNotFound: () => void,
   emitInvalidPayload: () => void,
+  now: () => number,
 ): void {
-  const route = resolveSignalRoute(socket, payload, state, emitNotFound);
+  const route = resolveSignalRoute(socket, payload, state, emitNotFound, now);
   if (!route) return;
 
   const sdp = normalizeSignalSdp(payload?.sdp);
@@ -158,8 +162,9 @@ export function handleSignalIce(
   io: Server,
   emitNotFound: () => void,
   emitInvalidPayload: () => void,
+  now: () => number,
 ): void {
-  const route = resolveSignalRoute(socket, payload, state, emitNotFound);
+  const route = resolveSignalRoute(socket, payload, state, emitNotFound, now);
   if (!route) return;
 
   const candidate = normalizeSignalCandidate(payload?.candidate);

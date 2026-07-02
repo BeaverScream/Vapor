@@ -2,7 +2,7 @@
 
 Docs index: [docs/README.md](README.md) — compact agent entry point.
 
-Date: 2026-06-18  
+Date: 2026-06-29  
 Owner: @vapor-pm  
 Status: Active
 
@@ -19,52 +19,52 @@ Tracks active phase work only. Each phase section lists the VP tasks for that ph
 
 ---
 
-## 📌 Phase Summaries
-- Phase 0: Deterministic room lifecycle bootstrap, contract locking, and restart-clears-state behavior.
-- Phase 1: Canonical event naming, password/auth semantics, host identity, and lifecycle timers.
-- Phase 2: P2P signaling, chat readiness, ICE policy, participant cap, and release gating.
-- Phase 3: Security & Housekeeping (sweepers/reconnect), Nickname identity, and IP-scoped abuse controls.
-- Phase 4: Identity display, performance optimization, open-room support, and advanced peer interaction.
-- Phase 5: Refactoring the code to improve maintainability.
-- Phase 6: Authenticated admin metrics API, RAM-only observability, and a live dashboard UI.
-- Phase 7: Visual redesign (Stitch reference), client-side theme system (Light/Dark/Blue), and info-page restructure (Privacy/FAQ).
-- Phase 8: Mobile-first responsiveness, UX bug fixes (kick stall + solo timer), host badge, browser notifications, human-readable room names, and desktop layout with participant side panel.
-- Phase 9: Kick flow correctness, solo timer & lifecycle bugs, state/type cleanup, contract test suite recovery, core hook lint compliance, and metrics wiring fix. ✅ **Complete: 274/274 tests passing.**
-- Phase 10: E2E bug fixes from Phase 9 validation testing (guest disconnect notification, guest messaging), UI reliability, and chat history persistence (with reconnect dedup).
 
----
-
-## Phase 10: Bug Fix & Chat Persistence
+## Phase 11: Spec-Code Alignment & Bug Fixes
 
 **Status:** Planned  
-**Estimated Effort:** ~10 hours (2–3 days with testing)  
-**Trigger:** E2E validation testing of Phase 9 revealed correctness bugs in disconnect/reconnect flow and UI.
+**Estimated Effort:** ~7–9 hours (1–2 days with testing)  
+**Trigger:** System design spec recently reviewed and updated (2026-06-29). Code alignment gaps and protocol contract mismatches identified in Phase 10 review. Two additional items (VP-11.7, VP-11.8) added during Phase 11 planning based on architecture review.
 
-- [ ] **VP-10.1 Guest Disconnect Notification** *(BL-SIG-GUEST-DISCONNECT-01)*
-  - **Issue:** Guest TCP disconnects do NOT emit `peer_left` to remaining participants, violating System Design Rule 5. Comment in code says "Guest stays visible until grace expires" but this contradicts the spec.
-  - **Why:** Guests should be immediately removed from the active participants list (`liveCount`). The grace window (30 min) is for reconnection eligibility only, not visibility. Other participants see stale state and try to send messages to disconnected guests, causing message delivery to fail.
-  - **Expected Outcome:** Backend emits `peer_left` (reason: "disconnect") when a guest TCP disconnects, matching the host disconnect path. Guest grace window runs independently for reconnection tracking. See [code_review_phase_9.md E2E-1](work/archive/code_review_phase_9.md#e2e-1-critical--guest-disconnect-does-not-emit-peer_left-event).
+**Scope:** Seven targeted fixes addressing spec/code misalignment and correctness issues:
 
-- [ ] **VP-10.2 Guest Messaging After Host Disconnect** *(BL-SIG-GUEST-MESSAGING-01)*
-  - **Issue:** When host disconnects, remaining guests cannot exchange messages via WebRTC P2P. Problem persists after host reconnects; resolves on host's second disconnect (suggests state corruption).
-  - **Why:** Likely cause: `onPeerLeft` handler does not revalidate the WebRTC peer mesh after the host is removed. Pending messages might be incorrectly cleared or blocked. Root cause requires tracing WebRTC connection state.
-  - **Expected Outcome:** Guests can send/receive messages to each other after host disconnects. Host reconnect does not corrupt peer messaging. See [code_review_phase_9.md E2E-2](work/archive/code_review_phase_9.md#e2e-2-guests-cannot-exchange-messages-after-host-disconnect).
+- [ ] **VP-11.1 Rename Solo Timer Constant** *(BL-SIG-SOLO-RENAME-01)*
+  - **Issue:** The 15-min empty-room timer constant is misleadingly named `SOLO_HOST_ROOM_TIMEOUT_MS` (implies host-only), but the timer applies to any lone live participant (host or guest). The system design docs were updated to `SOLO_ROOM_TIMEOUT_MS` on 2026-06-29; the code symbol is now the only place carrying the legacy name.
+  - **Why:** The "HOST" in the name contradicts the confirmed any-solo model and repeatedly misleads readers. This is a doc/code drift; the rename unblocks clarity in other items (VP-11.2).
+  - **Expected Outcome:** Pure rename: `SOLO_HOST_ROOM_TIMEOUT_MS` → `SOLO_ROOM_TIMEOUT_MS` across `shared/policy.ts`, `backend/src/signaling/contracts.ts`, `registerSocketHandlers.ts`, and all test files. No behavior change.
 
-- [ ] **VP-10.3 UI Reliability & Styling**
-  - **Issue (3a):** Room expiry timer display is unreliable; disappears and reappears with UI interactions.
-  - **Issue (3b):** Long chat histories trigger browser scroll bar instead of chat container scroll bar.
-  - **Why:** The lifetime chip unmounts whenever an input gains focus (the `isInputFocused` guard). The desktop chat feed escapes its container because a flex ancestor is missing a height constraint (`min-h-0`).
-  - **Expected Outcome:** (3a) Timer stays mounted and updates every second while typing. (3b) Chat container shows its own scroll bar for long histories.
+- [ ] **VP-11.2 Import Missing Signaling Constants from Spec** *(BL-SHARED-CONSTANTS-01)*
+  - **Issue:** System constants defined in `core-architecture.md` §2 are absent from `shared/policy.ts` and hardcoded locally in backend handlers: `SWEEPER_INTERVAL_HOURS`, `JOIN_RATE_LIMIT_WINDOW_MS`, `JOIN_RATE_LIMIT_MAX`, `CREATE_RATE_LIMIT_WINDOW_MS`, `CREATE_RATE_LIMIT_MAX`. Code diverges silently from spec. (`HEARTBEAT_INTERVAL_MS` and `PARTICIPANT_STALE_MS` are excluded — these are removed by VP-11.7.)
+  - **Why:** Centralizing them in `shared/policy.ts` makes the design spec and running code a single source of truth and prevents silent drift.
+  - **Expected Outcome:** Five missing constants exported from `shared/policy.ts` with values from `core-architecture.md` §2 (`CREATE_RATE_LIMIT_MAX = 30` per VP-11.8). Backend handlers import from shared instead of hardcoding. `core-architecture.md` §2 and `shared/policy.ts` match exactly.
 
-- [x] **VP-10.4 Chat History Persistence (Local)** *(BL-UX-CHAT-PERSISTENCE-01)*
-  - **Issue:** Chat history is wiped on involuntary TCP drops, losing context for accidental disconnects.
-  - **Decision:** Preserve chat in `sessionStorage` per room unless the user has effectively left. Single entry per room (`vapor.chat:<roomId>`), overwritten (not appended) on each message. **Storage model:** not on the server (signaling-only, zero-persistence) and not a replicated/verified ledger — messages are P2P over WebRTC and each client keeps its own per-**tab** copy of what it received; no consensus, copies can legitimately differ.
-  - **Why:** Improves UX for accidental refreshes while maintaining ephemeral architecture (no server persistence, tab-scoped only). Disconnect ≠ leave: an involuntary drop+reconnect restores the snapshot; an expired grace window or explicit leave is treated as a leave and clears it.
-  - **Reconnect guarantees:** displayed history = the restored snapshot (never empty, never a re-delivered backfill). The outbound pending queue must not re-flush stale messages to peers, and incoming messages dedupe by id so restored entries are never shown twice. (Absorbs the former standalone reconnect-leak item.)
-  - **Clear on terminal events only:** explicit leave/back, kick, `room_destroyed` (covers **host grace expiry** — destroys the room and fans out to all clients), and a failed/stale resume `RECONNECT_TOKEN_STALE`/`HOST_RECONNECT_WINDOW_EXPIRED` (covers **guest grace expiry**, detected on the returning guest). Never clear on a recoverable TCP drop.
-  - **Expected Outcome:** Chat history survives accidental disconnect and is restored on reconnect, with no duplicates. Leave/kick/room-destroy/expired-grace clears history. See [docs/system_design/Vapor_System_Design.md §1.1](docs/system_design/Vapor_System_Design.md#11-frontend-token-storage-policy) for persistence spec.
+- [ ] **VP-11.4 Fix Guest Grace Participant Count** *(BL-SIG-GRACE-COUNT-01)*
+  - **Issue:** `handleGuestGraceExpired` emits `peer_left` with `participantCount = activeRoom.participants.size`, which counts `disconnected:` sentinels (guests/hosts in their own grace window). Every other emit path uses `getLiveParticipantCount`. Client displays a phantom participant; count disagrees with live-count values elsewhere.
+  - **Why:** Consistency error: the broadcast count overstates live participants and makes the displayed count unreliable.
+  - **Expected Outcome:** `handleGuestGraceExpired` computes and emits `getLiveParticipantCount(activeRoom)`. Integration tests verify correct count is broadcast.
+
+- [ ] **VP-11.5 Remove Off-Contract Nickname-Update Feature** *(BL-NICKNAME-UPDATE-OBSOLETE-01)*
+  - **Issue:** The system design no longer provides a nickname-change capability — nicknames are immutable. The signaling contract lists neither `nickname_update` nor `nickname_updated` events. Yet the codebase still implements a full nickname-update path: backend handler, frontend wiring, shared payloads/events, cooldown constant. Dead, off-contract surface increases maintenance cost and is the root cause of BL-NICKNAME-LISTENER-DUP-01.
+  - **Why:** Off-contract code drifts from the source-of-truth signaling contract and creates maintenance traps.
+  - **Expected Outcome:** Remove `nickname_update`/`nickname_updated` event, handler, payloads, cooldown constant, `nicknameUpdatedAt` field, and all frontend wiring from socket client, room hook, and state reducers. Keep only initial nickname assignment and validation. Build/lint/typecheck clean.
+
+- [ ] **VP-11.6 Fix Kick Reason & Socket Removal Order** *(BL-SIG-KICK-REASON-ORDER-01)*
+  - **Issue:** Kick handler emits `peer_left` with `reason: "leave"` instead of `"kick"` (frontend maps any non-"disconnect" reason to "left", so kick is indistinguishable). Also broadcasts `peer_left` while the kicked socket is still in the Socket.IO room; kicked socket receives a `peer_left` about itself that it should not.
+  - **Why:** Contract violation: frontend cannot differentiate a removal, and the kicked socket receives broadcasts it should not (violates contract and can drive incorrect self-state).
+  - **Expected Outcome:** Emit `reason: "kick"`. Emit `participant_kicked` to the room first (while the target socket is still present, so it receives its own kick notification), then remove the kicked socket from state and disconnect, then broadcast `peer_left` to remaining participants only. Kicked socket receives only `participant_kicked` about itself. Frontend maps `reason: "kick"` to "was removed" system message. Integration tests verify event order and reason.
+
+- [ ] **VP-11.7 Drop Heartbeat Mechanism** *(Planning decision 2026-06-29)*
+  - **Issue:** The application-layer heartbeat is dead code on both ends: the frontend never emits `heartbeat` (no `emitHeartbeat` in `room-socket-client.ts`). Socket.IO's own transport-level ping/pong handles silent disconnect detection; `on("disconnect")` fires on all drop scenarios and already performs the necessary cleanup via grace window timers.
+  - **Why:** The heartbeat handler adds a server handler and event constant that collectively do nothing. Removing them reduces surface area with zero behavioral loss.
+  - **Expected Outcome:** Remove `socket.on("heartbeat", ...)` server handler and `HEARTBEAT` from `CLIENT_EVENT_NAMES` (if present). RETAIN `lastSeenAt` in `ParticipantRecord` — it is refreshed on every `signal_offer`/`signal_answer`/`signal_ice` relay in place of the removed heartbeat ping. Do NOT add `HEARTBEAT_INTERVAL_MS` or `PARTICIPANT_STALE_MS` to `shared/policy.ts`. Build/typecheck clean.
+
+- [ ] **VP-11.8 Raise IP Create Rate Limit Threshold** *(Planning decision 2026-06-29)*
+  - **Issue:** `IP_CREATE_THRESHOLD = 10` (the per-IP `create_room` ceiling per 60-second window) is too low for shared networks (home routers, public wifi). Ten users on the same NAT simultaneously creating rooms would collectively exhaust the limit and block everyone else on that IP. The current value was set conservatively without considering the early-stage user base and shared-IP scenarios.
+  - **Why:** Overly aggressive IP-level throttling hurts legitimate users on shared networks (e.g. home routers, public wifi with many users behind the same NAT) without meaningfully improving abuse resistance.
+  - **Expected Outcome:** `CREATE_RATE_LIMIT_MAX` raised from 10 to 30 in `shared/policy.ts` (added by VP-11.2) and reflected in `core-architecture.md` §2. All other rate-limit parameters unchanged. Integration test verifies IP block triggers at 31st attempt, not 11th.
 
 ---
 
 ## 🗂️ Notes
 - Completed work and long history are archived separately under `docs/work/archive/`.
+- Phase 10 completion summary: See `docs/Completed.md` for final status.

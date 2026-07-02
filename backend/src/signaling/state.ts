@@ -4,7 +4,6 @@ export type ParticipantRecord = {
   joinedAt: number;
   lastSeenAt: number;
   nickname?: string;
-  nicknameUpdatedAt?: number;
 };
 
 export type RoomRecord = {

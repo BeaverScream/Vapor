@@ -1,7 +1,6 @@
 import type {
   ChatConnectionState,
   ChatMessage,
-  NicknameUpdatedPayload,
   Participant,
   PeerJoinedPayload,
   PeerLeftPayload,
@@ -138,16 +137,6 @@ export function withPeerLeft(state: RoomSessionState, payload: PeerLeftPayload):
     ...state,
     participants: state.participants.filter((participant) => participant.participantId !== payload.participantId),
     participantCount: payload.participantCount,
-  }
-}
-
-export function withNicknameUpdated(state: RoomSessionState, payload: NicknameUpdatedPayload): RoomSessionState {
-  return {
-    ...state,
-    participantNicknames: {
-      ...state.participantNicknames,
-      [payload.participantId]: payload.nickname,
-    },
   }
 }
 

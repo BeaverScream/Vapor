@@ -1,7 +1,7 @@
-import { JOIN_INVALID_ATTEMPT_COOLDOWN_MS } from '@shared'
+import { JOIN_RATE_LIMIT_WINDOW_MS } from '@shared'
 
 export const SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL ?? 'http://localhost:3001'
-export const JOIN_RATE_LIMIT_COOLDOWN_MS = JOIN_INVALID_ATTEMPT_COOLDOWN_MS
+export const JOIN_RATE_LIMIT_COOLDOWN_MS = JOIN_RATE_LIMIT_WINDOW_MS
 export const RECONNECT_SESSION_STORAGE_KEY = 'vapor.reconnect.session'
 // Per-room chat history is persisted (session-scoped, tab-local) under
 // `${CHAT_HISTORY_STORAGE_KEY_PREFIX}<roomId>` so an accidental TCP drop +
@@ -50,7 +50,7 @@ export const UI_COPY = {
   ROOM_ENDED_SOLO_TIMEOUT_EXPIRED: 'Room ended because no guest joined in time.',
   CONNECTING_RETRY: 'Connecting… Try again in a moment.',
   GENERIC_ERROR: 'Could not connect. Try again.',
-  JOIN_RATE_LIMITED: 'Too many attempts for this room. Try again later.',
+  JOIN_RATE_LIMITED: 'Too many join attempts. Try again in a minute.',
   SOLO_HOST_WARNING: 'Solo room expires if no guest joins in',
   INVALID_NICKNAME: 'Nickname must be 3–24 characters (letters, numbers, spaces, - or _).',
   KICKED_FROM_ROOM: 'You were removed from this room by the host.',

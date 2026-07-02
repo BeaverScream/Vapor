@@ -4,7 +4,7 @@ Date: 2026-06-29
 Owner: @sys-architect  
 Status: Active
 
-Part of the Vapor system-design source-of-truth set — navigate via [INDEX.md](./INDEX.md). This file owns room lifecycle behavior: create/join/leave, disconnect grace, solo & empty-room timers, destruction reasons, `liveCount` semantics, reconnect, kick, abuse control, heartbeat housekeeping, and room naming. Diagrams are co-located with the rules they depict. Constants are defined in [core-architecture.md](./core-architecture.md) §2; event payloads in [signaling-contract.md](./signaling-contract.md).
+Part of the Vapor system-design source-of-truth set — navigate via [INDEX.md](./INDEX.md). This file owns room lifecycle behavior: create/join/leave, disconnect grace, solo & empty-room timers, destruction reasons, `liveCount` semantics, reconnect, kick, abuse control, and room naming. Diagrams are co-located with the rules they depict. Constants are defined in [core-architecture.md](./core-architecture.md) §2; event payloads in [signaling-contract.md](./signaling-contract.md).
 
 ## 1) Lifecycle Rules
 
@@ -276,21 +276,13 @@ sequenceDiagram
    - temporary blocklist guard,
    - RAM pressure guard.
 2. Incognito/private browsing must not be treated as a deterministic signal; browser mode detection is not reliable.
-3. When create-room burst thresholds or memory-pressure thresholds are exceeded, the service may place the `subject` or IP into a temporary in-memory blocklist with automatic expiry.
+3. When create-room burst thresholds or memory-pressure thresholds are exceeded, the service may place the IP into a temporary in-memory blocklist with automatic expiry.
 4. Any create rejection from abuse control returns deterministic `RATE_LIMITED`.
 5. Abuse handling must prefer aggregate detection and temporary blocking over client-side friction.
 6. Temporary blocks are operational controls, not identity proof, and must not be used to persist or infer user data.
 7. Nickname uniqueness is room-scoped friction and must not be treated as security identity.
 
-## 8) Heartbeat and Stale-Session Housekeeping
-
-1. Participants should send periodic heartbeats at `HEARTBEAT_INTERVAL_MS`.
-2. Update `lastSeenAt` on each heartbeat and on other authenticated room activity.
-3. If `Date.now() - lastSeenAt` exceeds `PARTICIPANT_STALE_MS`, mark the participant stale for housekeeping and diagnostics.
-4. Stale state must not eject an active participant by itself unless another lifecycle rule also applies.
-5. Stale tracking must remain RAM-only and cleared on room destruction or process restart.
-
-## 9) Room Naming
+## 8) Room Naming
 
 - Hosts may optionally provide a human-readable room name at creation via `create_room({ ..., roomName? })`.
 - Room names are optional; omitting `roomName` or providing an empty string creates a room identified by its auto-generated `roomId` only.

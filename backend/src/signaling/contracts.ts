@@ -9,7 +9,6 @@ export const CLIENT_EVENTS = {
   signalAnswer: shared.CLIENT_EVENT_NAMES.SIGNAL_ANSWER,
   signalIce: shared.CLIENT_EVENT_NAMES.SIGNAL_ICE,
   resumeSession: shared.CLIENT_EVENT_NAMES.RESUME_SESSION,
-  nicknameUpdate: shared.CLIENT_EVENT_NAMES.NICKNAME_UPDATE,
   roomPasswordUpdate: shared.CLIENT_EVENT_NAMES.ROOM_PASSWORD_UPDATE,
   kickParticipant: shared.CLIENT_EVENT_NAMES.KICK_PARTICIPANT
 } as const;
@@ -19,7 +18,6 @@ export const SERVER_EVENTS = {
   roomJoined: shared.SERVER_EVENT_NAMES.ROOM_JOINED,
   peerJoined: shared.SERVER_EVENT_NAMES.PEER_JOINED,
   peerLeft: shared.SERVER_EVENT_NAMES.PEER_LEFT,
-  nicknameUpdated: shared.SERVER_EVENT_NAMES.NICKNAME_UPDATED,
   signalOffer: shared.SERVER_EVENT_NAMES.SIGNAL_OFFER,
   signalAnswer: shared.SERVER_EVENT_NAMES.SIGNAL_ANSWER,
   signalIce: shared.SERVER_EVENT_NAMES.SIGNAL_ICE,
@@ -52,13 +50,14 @@ export {
   SERVER_EVENT_NAMES,
   GUEST_DISCONNECT_GRACE_MS,
   HOST_DISCONNECT_GRACE_MS,
-  JOIN_INVALID_ATTEMPT_COOLDOWN_MAX,
-  JOIN_INVALID_ATTEMPT_COOLDOWN_MS,
-  JOIN_INVALID_ATTEMPT_NO_COOLDOWN_MAX,
   MAX_PARTICIPANTS_PER_ROOM,
   ROOM_MAX_DURATION_MS,
-  SOLO_HOST_ROOM_TIMEOUT_MS,
-  NICKNAME_CHANGE_COOLDOWN_MS,
+  SOLO_ROOM_TIMEOUT_MS,
+  SWEEPER_INTERVAL_HOURS,
+  JOIN_RATE_LIMIT_WINDOW_MS,
+  JOIN_RATE_LIMIT_MAX,
+  CREATE_RATE_LIMIT_WINDOW_MS,
+  CREATE_RATE_LIMIT_MAX,
   SIGNALING_ERROR_CODES
 } from "@shared";
 
@@ -81,8 +80,6 @@ export type {
   RoomJoinedPayload,
   RoomPasswordUpdatePayload,
   RoomPasswordUpdatedPayload,
-  NicknameUpdatePayload,
-  NicknameUpdatedPayload,
   KickParticipantPayload,
   ParticipantKickedPayload,
   SocketErrorPayload

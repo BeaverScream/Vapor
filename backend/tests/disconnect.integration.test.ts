@@ -5,7 +5,9 @@ import assert from "node:assert/strict";
 import {
   CLIENT_EVENTS,
   SERVER_EVENTS,
-  SOLO_HOST_ROOM_TIMEOUT_MS,
+  SOLO_ROOM_TIMEOUT_MS,
+  GUEST_DISCONNECT_GRACE_MS,
+  HOST_DISCONNECT_GRACE_MS,
 } from "../src/signaling/contracts";
 import { registerSocketHandlers } from "../src/signaling/registerSocketHandlers";
 import { createSignalingState } from "../src/signaling/state";
@@ -236,8 +238,8 @@ test("guest TCP drop leaving host alone → peer_left carries soloDeadlineAt", (
   );
   assert.equal(
     peerLeft?.soloDeadlineAt,
-    TIME + SOLO_HOST_ROOM_TIMEOUT_MS,
-    "soloDeadlineAt equals now() + SOLO_HOST_ROOM_TIMEOUT_MS",
+    TIME + SOLO_ROOM_TIMEOUT_MS,
+    "soloDeadlineAt equals now() + SOLO_ROOM_TIMEOUT_MS",
   );
 });
 
@@ -265,7 +267,7 @@ test("all guests TCP drop → peer_left emitted per guest; final drop leaves hos
   assert.equal(secondPeerLeft?.participantCount, 1, "only the host remains live");
   assert.equal(
     secondPeerLeft?.soloDeadlineAt,
-    TIME + SOLO_HOST_ROOM_TIMEOUT_MS,
+    TIME + SOLO_ROOM_TIMEOUT_MS,
     "final guest drop restarts the solo timer for the lone host",
   );
 
@@ -344,4 +346,176 @@ test("after host disconnects, remaining guests can relay signal_offer/signal_ans
   assert.equal(host.popEvent(SERVER_EVENTS.signalOffer), undefined, "disconnected host must not receive relayed signal_offer");
   assert.equal(host.popEvent(SERVER_EVENTS.signalAnswer), undefined, "disconnected host must not receive relayed signal_answer");
   assert.equal(host.popEvent(SERVER_EVENTS.signalIce), undefined, "disconnected host must not receive relayed signal_ice");
+});
+
+// ---- VP-11.4 Fix: guest grace expiry uses getLiveParticipantCount, not .size ----
+
+// Replicates getLiveParticipantCount logic from registerSocketHandlers for assertion purposes.
+function countLiveParticipants(room: { participants: Map<string, { socketId: string }> }): number {
+  let count = 0;
+  for (const p of room.participants.values()) {
+    if (!p.socketId.startsWith("disconnected:")) count++;
+  }
+  return count;
+}
+
+type TimerEntry = { handle: { cleared: boolean; unref?: () => void }; delay: number; callback: () => void };
+
+function interceptTimers(): { scheduledTimeouts: TimerEntry[]; restore: () => void } {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const scheduledTimeouts: TimerEntry[] = [];
+
+  globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number) => {
+    const handle: { cleared: boolean; unref?: () => void } = { cleared: false, unref: () => undefined };
+    scheduledTimeouts.push({ handle, delay: Number(delay ?? 0), callback: () => callback() });
+    return handle as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+
+  globalThis.clearTimeout = ((handle: ReturnType<typeof setTimeout>) => {
+    const h = handle as unknown as { cleared?: boolean };
+    if (h) h.cleared = true;
+  }) as typeof clearTimeout;
+
+  return {
+    scheduledTimeouts,
+    restore: () => {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    },
+  };
+}
+
+test("T11.4-01: guest grace expiry with another guest still in grace — room not destroyed, live count correct", () => {
+  const { scheduledTimeouts, restore } = interceptTimers();
+
+  try {
+    const { io, state } = setupHarness();
+    const { host, guests, roomId } = setupRoom(io, ["socket-g1", "socket-g2"]);
+    const [g1, g2] = guests;
+
+    // setupRoom drains peerJoined from host only; drain the one G1 received when G2 joined
+    g1.socket.popEvent(SERVER_EVENTS.peerJoined);
+
+    // G1 disconnects — guest grace timer scheduled (GUEST_DISCONNECT_GRACE_MS)
+    g1.socket.triggerDisconnect();
+    host.popEvent(SERVER_EVENTS.peerLeft);
+    g2.socket.popEvent(SERVER_EVENTS.peerLeft);
+
+    // G2 disconnects — guest grace timer scheduled; host becomes solo (solo timer also scheduled)
+    g2.socket.triggerDisconnect();
+    host.popEvent(SERVER_EVENTS.peerLeft);
+
+    // G1's grace timer is the first GUEST_DISCONNECT_GRACE_MS entry (registered before G2's)
+    const g1GraceTimer = scheduledTimeouts.find(
+      (e) => e.delay === GUEST_DISCONNECT_GRACE_MS && !e.handle.cleared,
+    );
+    assert.ok(g1GraceTimer, "G1 guest grace timer must be scheduled on disconnect");
+    g1GraceTimer.handle.cleared = true;
+    g1GraceTimer.callback();
+
+    // Room must still exist: host is live, G2 sentinel is still in grace
+    assert.equal(state.rooms.has(roomId), true, "room must not be destroyed while G2 is still in grace and host is live");
+
+    const room = state.rooms.get(roomId);
+    assert.ok(room, "room state must be accessible");
+
+    // handleGuestGraceExpired deleted G1 from participants; host (live) + G2 (sentinel) remain
+    assert.equal(room.participants.size, 2, "participants.size must be 2 (host + G2 sentinel)");
+    assert.equal(countLiveParticipants(room), 1, "getLiveParticipantCount must be 1 (host only; G2 sentinel excluded)");
+    assert.equal(room.participants.has(g1.participantId), false, "G1 must be removed from participants map by grace expiry");
+
+    assert.equal(host.popEvent(SERVER_EVENTS.roomDestroyed), undefined, "host must not receive room_destroyed");
+    assert.equal(g2.socket.popEvent(SERVER_EVENTS.roomDestroyed), undefined, "G2 must not receive room_destroyed");
+  } finally {
+    restore();
+  }
+});
+
+test("T11.4-02: guest grace expiry with only host sentinel remaining — solo timer destroys room", () => {
+  const { scheduledTimeouts, restore } = interceptTimers();
+
+  try {
+    const { io, state } = setupHarness();
+    const { host, guests, roomId } = setupRoom(io, ["socket-g1"]);
+    const [g1] = guests;
+
+    // Host disconnects — enters host grace (sentinel); liveCount=1 (G1 still live) → solo timer starts
+    host.triggerDisconnect();
+    g1.socket.popEvent(SERVER_EVENTS.peerLeft);
+    g1.socket.popEvent(SERVER_EVENTS.hostReconnectGrace);
+
+    // G1 disconnects — guest grace timer scheduled (GUEST_DISCONNECT_GRACE_MS); liveCount=0
+    g1.socket.triggerDisconnect();
+    host.popEvent(SERVER_EVENTS.peerLeft); // drain: host socket is still in FakeIo room membership
+
+    // Pre-expiry: both participants are sentinels, getLiveParticipantCount = 0
+    const roomBeforeExpiry = state.rooms.get(roomId);
+    assert.ok(roomBeforeExpiry, "room must exist before G1 grace expires");
+    assert.equal(roomBeforeExpiry.participants.size, 2, "participants must hold both sentinels (host + G1) before expiry");
+    assert.equal(countLiveParticipants(roomBeforeExpiry), 0, "no live participants: both host and G1 are sentinels");
+
+    // Fire G1 guest-grace — sentinel cleanup only; does NOT destroy the room
+    const g1GraceTimer = scheduledTimeouts.find(
+      (e) => e.delay === GUEST_DISCONNECT_GRACE_MS && !e.handle.cleared,
+    );
+    assert.ok(g1GraceTimer, "G1 guest grace timer must be scheduled on disconnect");
+    g1GraceTimer.handle.cleared = true;
+    g1GraceTimer.callback();
+
+    // Room survives guest-grace expiry — G1 sentinel cleaned up, host sentinel + room persist
+    assert.equal(state.rooms.has(roomId), true, "room must survive guest-grace expiry; solo timer owns empty-room destruction");
+    const roomAfterGuestGrace = state.rooms.get(roomId);
+    assert.ok(roomAfterGuestGrace, "room state must be accessible after G1 grace");
+    assert.equal(roomAfterGuestGrace.participants.size, 1, "only host sentinel remains after G1 grace cleanup");
+
+    // Solo timer fires (armed when host disconnected with liveCount=1) → destroys room
+    const soloTimer = scheduledTimeouts.find(
+      (e) => e.delay === SOLO_ROOM_TIMEOUT_MS && !e.handle.cleared,
+    );
+    assert.ok(soloTimer, "solo/empty-room timer must be scheduled (armed when host disconnected with liveCount=1)");
+    soloTimer.handle.cleared = true;
+    soloTimer.callback();
+
+    assert.equal(state.rooms.has(roomId), false, "room must be destroyed when solo timer fires");
+    assert.equal(state.rooms.size, 0, "no rooms must remain in state after destruction");
+  } finally {
+    restore();
+  }
+});
+
+test("T11.4-03: guest grace expiry with host still live — room survives, live count correct", () => {
+  const { scheduledTimeouts, restore } = interceptTimers();
+
+  try {
+    const { io, state } = setupHarness();
+    const { host, guests, roomId } = setupRoom(io, ["socket-g1"]);
+    const [g1] = guests;
+
+    // G1 disconnects — guest grace timer scheduled; host becomes solo (solo timer restarted)
+    g1.socket.triggerDisconnect();
+    host.popEvent(SERVER_EVENTS.peerLeft);
+
+    const g1GraceTimer = scheduledTimeouts.find(
+      (e) => e.delay === GUEST_DISCONNECT_GRACE_MS && !e.handle.cleared,
+    );
+    assert.ok(g1GraceTimer, "G1 guest grace timer must be scheduled on disconnect");
+    g1GraceTimer.handle.cleared = true;
+    g1GraceTimer.callback();
+
+    // Room must still exist: host is live (getLiveParticipantCount = 1)
+    assert.equal(state.rooms.has(roomId), true, "room must survive when the host is still live");
+
+    const room = state.rooms.get(roomId);
+    assert.ok(room, "room state must be accessible");
+
+    // handleGuestGraceExpired deleted G1; only host remains
+    assert.equal(room.participants.size, 1, "participants.size must be 1 (only host remains after G1 removal)");
+    assert.equal(countLiveParticipants(room), 1, "getLiveParticipantCount must be 1 (host is live)");
+    assert.equal(room.participants.has(g1.participantId), false, "G1 must be removed from participants map by grace expiry");
+
+    assert.equal(host.popEvent(SERVER_EVENTS.roomDestroyed), undefined, "host must not receive room_destroyed");
+  } finally {
+    restore();
+  }
 });

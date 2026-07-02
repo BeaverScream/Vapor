@@ -5,7 +5,6 @@ import {
   type HostReconnectGracePayload as SharedHostReconnectGracePayload,
   type JoinRoomPayload,
   type KickParticipantPayload as SharedKickParticipantPayload,
-  type NicknameUpdatedPayload as SharedNicknameUpdatedPayload,
   type ParticipantKickedPayload as SharedParticipantKickedPayload,
   type PeerJoinedPayload as SharedPeerJoinedPayload,
   type PeerLeftPayload as SharedPeerLeftPayload,
@@ -40,7 +39,6 @@ export const SERVER_EVENTS = {
   ROOM_JOINED: SERVER_EVENT_NAMES.ROOM_JOINED,
   PEER_JOINED: SERVER_EVENT_NAMES.PEER_JOINED,
   PEER_LEFT: SERVER_EVENT_NAMES.PEER_LEFT,
-  NICKNAME_UPDATED: SERVER_EVENT_NAMES.NICKNAME_UPDATED,
   SIGNAL_OFFER: SERVER_EVENT_NAMES.SIGNAL_OFFER,
   SIGNAL_ANSWER: SERVER_EVENT_NAMES.SIGNAL_ANSWER,
   SIGNAL_ICE: SERVER_EVENT_NAMES.SIGNAL_ICE,
@@ -91,8 +89,6 @@ export interface ChatMessage {
 export type KickParticipantPayload = SharedKickParticipantPayload
 
 export type ParticipantKickedPayload = SharedParticipantKickedPayload
-
-export type NicknameUpdatedPayload = SharedNicknameUpdatedPayload
 
 export type RoomCreatedPayload = SharedRoomCreatedPayload
 
@@ -201,7 +197,6 @@ export interface RoomSocketClient {
   onPeerJoined: (handler: (payload: PeerJoinedPayload) => void) => void
   onPeerLeft: (handler: (payload: PeerLeftPayload) => void) => void
   onHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) => void
-  onNicknameUpdated: (handler: (payload: NicknameUpdatedPayload) => void) => void
   onParticipantKicked: (handler: (payload: ParticipantKickedPayload) => void) => void
   onRoomDestroyed: (handler: (payload: RoomDestroyedPayload) => void) => void
   onError: (handler: (payload: SocketErrorPayload) => void) => void
@@ -215,7 +210,6 @@ export interface RoomSocketClient {
   offPeerJoined: (handler: (payload: PeerJoinedPayload) => void) => void
   offPeerLeft: (handler: (payload: PeerLeftPayload) => void) => void
   offHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) => void
-  offNicknameUpdated: (handler: (payload: NicknameUpdatedPayload) => void) => void
   offParticipantKicked: (handler: (payload: ParticipantKickedPayload) => void) => void
   offRoomDestroyed: (handler: (payload: RoomDestroyedPayload) => void) => void
   offError: (handler: (payload: SocketErrorPayload) => void) => void

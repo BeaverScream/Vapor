@@ -33,7 +33,7 @@ This preserves ephemeral architecture while improving UX for accidental disconne
 
 - Backend remains fully RAM-only and stateless across process restarts.
 - Vapor does not use client-side anti-abuse friction by default.
-- Abuse handling is detect-and-block: monitor anomalous create-room bursts, then apply temporary in-memory blocks per `subject` or IP when thresholds are exceeded.
+- Abuse handling is detect-and-block: monitor anomalous create-room bursts, then apply temporary in-memory blocks per IP when thresholds are exceeded.
 - Any future client-side friction must be optional, explicitly justified, and outside the canonical zero-trace baseline.
 - Abuse controls must never store chat/file content, plaintext password, reconnect token, SDP/ICE, or PII.
 
@@ -49,12 +49,10 @@ export const SIGNALING_CONST = {
   SWEEPER_INTERVAL_HOURS: 5,
   NICKNAME_MIN_LENGTH: 3,
   NICKNAME_MAX_LENGTH: 24,
-  PARTICIPANT_STALE_MS: 30_000,
-  HEARTBEAT_INTERVAL_MS: 10_000,
   JOIN_RATE_LIMIT_WINDOW_MS: 60_000,
   JOIN_RATE_LIMIT_MAX: 30,
   CREATE_RATE_LIMIT_WINDOW_MS: 60_000,
-  CREATE_RATE_LIMIT_MAX: 10,
+  CREATE_RATE_LIMIT_MAX: 30,
   FILE_TRANSFER_MAX_SIZE_BYTES: 2 * 1024 * 1024 * 1024,  // 2 GB hard limit
   FILE_TRANSFER_CHUNK_SIZE_BYTES: 64 * 1024,              // 64 KB per chunk
   FILE_OFFER_TIMEOUT_MS: 60_000,                          // 60 s offer window
@@ -65,8 +63,6 @@ export const SIGNALING_CONST = {
 - `JOIN_RATE_LIMIT_*` applies to repeated `join_room` attempts, including wrong-password retries.
 - `CREATE_RATE_LIMIT_*` applies to repeated `create_room` attempts.
 - `NICKNAME_MIN_LENGTH` and `NICKNAME_MAX_LENGTH` define nickname boundaries.
-- `PARTICIPANT_STALE_MS` defines how long a participant can go without a heartbeat before the session is treated as stale for housekeeping.
-- `HEARTBEAT_INTERVAL_MS` is the expected client heartbeat cadence used to refresh `lastSeenAt`.
 - `SWEEPER_INTERVAL_HOURS` defines the coarse housekeeping cadence for the periodic sweeper; the runtime should convert it to milliseconds when scheduling timers.
 
 ## 3) Backend State Model (RAM only)
@@ -79,7 +75,7 @@ interface ParticipantRecord {
   socketId: string;          // "disconnected:<participantId>" when in grace window
   nickname?: string;
   joinedAt: number;
-  lastSeenAt: number;
+  lastSeenAt: number;        // updated on every successful signal relay (offer/answer/ice)
 }
 
 interface RoomRecord {
@@ -103,7 +99,7 @@ interface SignalingState {
 - `PasswordAuthContext` — per-room `{ passwordHash, passwordSalt, passwordVersion }`.
 - `GraceWindowContext` — per-room TTL timer, host/guest grace timers, `expiresAt`, `soloDeadlineAt`.
 - `ReconnectContext` — reconnect token index (`Map<tokenHash, { roomId, participantId, validUntil, passwordVersion }>`), disconnected participant tracking.
-- `RateLimitingContext` — per-IP/subject create and join rate limit records.
+- `RateLimitingContext` — per-IP create and join rate limit records.
 
 `RoomStatus` is a logical state: `active` (live participants present), `grace` (all participants disconnected with grace timers running), `destroyed` (removed from RAM). Rooms are removed from RAM immediately on destruction — there is no intermediate expired state.
 

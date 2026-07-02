@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type {
   HostReconnectGracePayload,
-  NicknameUpdatedPayload,
   ParticipantKickedPayload,
   PeerJoinedPayload,
   PeerLeftPayload,
@@ -25,7 +24,6 @@ export type SocketEventHandlers = {
   onSignalOffer: (payload: SignalOfferRelayPayload) => void
   onSignalAnswer: (payload: SignalAnswerRelayPayload) => void
   onSignalIce: (payload: SignalIceRelayPayload) => void
-  onNicknameUpdated: (payload: NicknameUpdatedPayload) => void
   onParticipantKicked: (payload: ParticipantKickedPayload) => void
   onHostReconnectGrace: (payload: HostReconnectGracePayload) => void
   onRoomDestroyed: (payload: RoomDestroyedPayload) => void
@@ -59,7 +57,6 @@ export function useSocketConnection(
     const onSignalOffer = (p: SignalOfferRelayPayload): void => handlersRef.current.onSignalOffer(p)
     const onSignalAnswer = (p: SignalAnswerRelayPayload): void => handlersRef.current.onSignalAnswer(p)
     const onSignalIce = (p: SignalIceRelayPayload): void => handlersRef.current.onSignalIce(p)
-    const onNicknameUpdated = (p: NicknameUpdatedPayload): void => handlersRef.current.onNicknameUpdated(p)
     const onParticipantKicked = (p: ParticipantKickedPayload): void => handlersRef.current.onParticipantKicked(p)
     const onHostReconnectGrace = (p: HostReconnectGracePayload): void => handlersRef.current.onHostReconnectGrace(p)
     const onRoomDestroyed = (p: RoomDestroyedPayload): void => handlersRef.current.onRoomDestroyed(p)
@@ -74,7 +71,6 @@ export function useSocketConnection(
     socket.onSignalOffer(onSignalOffer)
     socket.onSignalAnswer(onSignalAnswer)
     socket.onSignalIce(onSignalIce)
-    socket.onNicknameUpdated(onNicknameUpdated)
     socket.onParticipantKicked(onParticipantKicked)
     socket.onHostReconnectGrace(onHostReconnectGrace)
     socket.onRoomDestroyed(onRoomDestroyed)
@@ -90,7 +86,6 @@ export function useSocketConnection(
       socket.offSignalOffer(onSignalOffer)
       socket.offSignalAnswer(onSignalAnswer)
       socket.offSignalIce(onSignalIce)
-      socket.offNicknameUpdated(onNicknameUpdated)
       socket.offParticipantKicked(onParticipantKicked)
       socket.offHostReconnectGrace(onHostReconnectGrace)
       socket.offRoomDestroyed(onRoomDestroyed)

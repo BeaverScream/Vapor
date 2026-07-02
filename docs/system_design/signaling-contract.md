@@ -29,7 +29,7 @@ shared/                  # Signaling contract (imported by both sides)
 | `shared/events.ts` | `CLIENT_EVENT_NAMES`, `SERVER_EVENT_NAMES` |
 | `shared/error-codes.ts` | `SIGNALING_ERROR_CODES` |
 | `shared/reasons.ts` | `RoomDestroyedReason` union type |
-| `shared/policy.ts` | `JOIN_INVALID_ATTEMPT_COOLDOWN_MS`, `JOIN_INVALID_ATTEMPT_NO_COOLDOWN_MAX`, `JOIN_INVALID_ATTEMPT_COOLDOWN_MAX`, and other policy constants |
+| `shared/policy.ts` | Rate-limit and timeout policy constants (`JOIN_RATE_LIMIT_WINDOW_MS`, `JOIN_RATE_LIMIT_MAX`, `CREATE_RATE_LIMIT_WINDOW_MS`, `CREATE_RATE_LIMIT_MAX`, `SWEEPER_INTERVAL_HOURS`, etc.) |
 | `shared/payloads.ts` | All request/response payload interfaces for signaling events |
 | `shared/index.ts` | Central barrel re-export for all of the above |
 
@@ -55,7 +55,6 @@ if (error.code === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND) { ... }
 - `signal_offer({ roomId, toParticipantId, sdp })`
 - `signal_answer({ roomId, toParticipantId, sdp })`
 - `signal_ice({ roomId, toParticipantId, candidate })`
-- `heartbeat({ roomId })`
 - `resume_session({ roomId, reconnectToken })`
 - `kick_participant({ roomId, targetParticipantId })` — host-only; evicts the specified participant
 
@@ -65,8 +64,8 @@ if (error.code === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND) { ... }
   - `peers: Array<{ participantId: string; nickname: string | null; isHost: boolean }>`
 - `session_resumed({ roomId, participantId, hostId, participantNickname, peers, expiresAt, soloDeadlineAt, hostReconnectGraceDeadlineAt, participantCount, hasPassword, roomName? })` — sent to the reconnecting participant on successful `resume_session`
   - `peers: Array<{ participantId: string; nickname: string | null; isHost: boolean }>`
-- `peer_joined({ participantId, nickname })`
-- `peer_left({ participantId, reason, soloDeadlineAt? })` — `reason: "disconnect" | "leave" | "kick"`; `soloDeadlineAt` is included when the solo timer (re)starts as a result of this event
+- `peer_joined({ participantId, nickname, participantCount })`
+- `peer_left({ participantId, reason, participantCount, soloDeadlineAt? })` — `reason: "disconnect" | "leave" | "kick"`; `soloDeadlineAt` is included when the solo timer (re)starts as a result of this event
 - `host_reconnect_grace({ deadlineAt })` — broadcast to remaining live participants when host disconnects
 - `room_destroyed({ reason })`
 - `participant_kicked({ participantId })` — broadcast to remaining live participants (after kicked socket is removed) when a participant is evicted by the host
@@ -87,7 +86,6 @@ if (error.code === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND) { ... }
 | `CLIENT_EVENT_NAMES.SIGNAL_OFFER` | `"signal_offer"` |
 | `CLIENT_EVENT_NAMES.SIGNAL_ANSWER` | `"signal_answer"` |
 | `CLIENT_EVENT_NAMES.SIGNAL_ICE` | `"signal_ice"` |
-| `CLIENT_EVENT_NAMES.HEARTBEAT` | `"heartbeat"` |
 | `CLIENT_EVENT_NAMES.RESUME_SESSION` | `"resume_session"` |
 | `CLIENT_EVENT_NAMES.KICK_PARTICIPANT` | `"kick_participant"` |
 
@@ -116,6 +114,7 @@ if (error.code === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND) { ... }
 - `kick_participant` and `participant_kicked` payloads are defined in `shared/payloads.ts` and consumed by both sides.
 - `peers` in `room_joined` and `session_resumed` is `Array<{ participantId: string; nickname: string | null; isHost: boolean }>`.
 - `soloDeadlineAt` is included in `room_created`, `room_joined`, `session_resumed`, and `peer_left` payloads where applicable.
+- `participantCount` is included in `peer_joined` and `peer_left` — reflects the live participant count after the join/departure is applied.
 
 ## 6) Adoption
 

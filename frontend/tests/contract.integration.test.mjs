@@ -208,8 +208,8 @@ test('T2.4-03: frontend error layer handles RATE_LIMITED code and surfaces join-
   expectContains(errorCopy, 'case SIGNALING_ERROR_CODES.RATE_LIMITED:', 'RATE_LIMITED error code mapping in error-copy')
   expectContains(errorCopy, 'case SIGNALING_ERROR_CODES.ROOM_FULL:', 'ROOM_FULL error code mapping in error-copy')
   expectContains(useRoom, 'SIGNALING_ERROR_CODES.RATE_LIMITED', 'RATE_LIMITED reference in useRoom join path')
-  expectContains(constants, 'JOIN_RATE_LIMIT_COOLDOWN_MS = JOIN_INVALID_ATTEMPT_COOLDOWN_MS', 'frontend cooldown sourced from shared policy')
-  expectContains(sharedPolicy, 'JOIN_INVALID_ATTEMPT_COOLDOWN_MS = 10 * 60 * 1000', 'shared cooldown policy constant')
+  expectContains(constants, 'JOIN_RATE_LIMIT_COOLDOWN_MS = JOIN_RATE_LIMIT_WINDOW_MS', 'frontend cooldown sourced from IP rate-limit window')
+  expectContains(sharedPolicy, 'JOIN_RATE_LIMIT_WINDOW_MS = 60_000', 'shared IP rate-limit window constant')
 })
 
 // ---- Host Identity ----
@@ -280,14 +280,8 @@ test('T3.2-05 (P3-NK-005): reconnect flow restores participant identity and nick
   expectContains(useRoom, 'resumeInFlightRef.current = false', 'resumeInFlightRef cleared on successful room_joined')
   expectContains(useRoom, 'autoResumeRequestedRef.current = false', 'autoResumeRequestedRef cleared on successful room_joined')
 
-  // Nickname changes broadcast after reconnect must be applied to the identity map
-  expectContains(useRoom, 'socket.onNicknameUpdated(onNicknameUpdated)', 'nickname_updated subscription active after reconnect')
-
   // Nickname state must be scrubbed on room destruction so stale identity cannot bleed into new sessions
   expectContains(stateUtils, 'participantNicknames: {}', 'nickname map cleared on room end and lobby reset')
-
-  // Socket client must route nickname_updated through the shared server event constant
-  expectContains(socketClient, 'socket.on(SERVER_EVENTS.NICKNAME_UPDATED, handler)', 'nickname_updated socket event listener wiring')
 })
 
 // ---- T3.3 Ops, Abuse Controls & Tests ----
@@ -307,9 +301,9 @@ test('T3.3-04 (P3-AB-004): lifecycle edge case contract coverage — TTL expiry,
 
   // Solo-timeout: backend wires the solo host timer to destroy with solo_timeout_expired
   expectContains(handlers, '"solo_timeout_expired"', 'solo_timeout_expired reason used in solo-host timer callback')
-  expectContains(handlers, 'SOLO_HOST_ROOM_TIMEOUT_MS', 'SOLO_HOST_ROOM_TIMEOUT_MS used as solo timer duration in handler')
+  expectContains(handlers, 'SOLO_ROOM_TIMEOUT_MS', 'SOLO_ROOM_TIMEOUT_MS used as solo timer duration in handler')
   expectContains(sharedReasons, 'SOLO_TIMEOUT_EXPIRED: "solo_timeout_expired"', 'solo_timeout_expired reason declared in shared reasons')
-  expectContains(sharedPolicy, 'SOLO_HOST_ROOM_TIMEOUT_MS', 'Solo-host timeout constant present in shared policy')
+  expectContains(sharedPolicy, 'SOLO_ROOM_TIMEOUT_MS', 'Solo-host timeout constant present in shared policy')
 
   // Solo-timeout state: soloDeadlineAt is included in room_created payload so clients can show countdown
   expectContains(handlers, 'soloDeadlineAt: policy.soloDeadlineAt', 'soloDeadlineAt included in room_created payload')
@@ -329,8 +323,8 @@ test('T3.3-04 (P3-AB-004): lifecycle edge case contract coverage — TTL expiry,
   // Burst rate limiting: abuse control uses a temporary in-memory blocklist, not per-room quotas (BL-QUOTA-03)
   // The implementation lives in rateLimiting.ts; handler delegates via rateLimiting.checkAndRecordCreateAttempt
   expectContains(handlers, 'rateLimiting.checkAndRecordCreateAttempt', 'Abuse control wired through rateLimiting module in handler')
-  expectContains(rateLimiting, 'temporaryBlocklistBySubject', 'Abuse control uses temporary in-memory blocklist, not quotas')
-  expectContains(rateLimiting, 'createAttemptsBySubject', 'Create-room burst window is tracked per-subject in RAM only')
+  expectContains(rateLimiting, 'temporaryBlocklistByIp', 'Abuse control uses temporary in-memory blocklist, not quotas')
+  expectContains(rateLimiting, 'createAttemptsByIp', 'Create-room burst window is tracked per-subject in RAM only')
   expectContains(rateLimiting, 'CREATE_ROOM_BURST_THRESHOLD', 'Burst threshold constant gates the blocklist trigger')
 })
 

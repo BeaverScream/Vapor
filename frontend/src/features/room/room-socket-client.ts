@@ -8,7 +8,6 @@ import {
   type JoinRoomRequest,
   type KickParticipantRequest,
   type LeaveRoomRequest,
-  type NicknameUpdatedPayload,
   type ParticipantKickedPayload,
   type RoomSocketClient,
   type ResumeSessionRequest,
@@ -43,8 +42,6 @@ export function createRoomSocketClient(signalingUrl: string = SIGNALING_URL): Ro
     onSignalIce: (handler: (payload: SignalIceRelayPayload) => void) => socket.on(SERVER_EVENTS.SIGNAL_ICE, handler),
     onHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) =>
       socket.on(SERVER_EVENTS.HOST_RECONNECT_GRACE, handler),
-    onNicknameUpdated: (handler: (payload: NicknameUpdatedPayload) => void) =>
-      socket.on(SERVER_EVENTS.NICKNAME_UPDATED, handler),
     onParticipantKicked: (handler: (payload: ParticipantKickedPayload) => void) =>
       socket.on(SERVER_EVENTS.PARTICIPANT_KICKED, handler),
     onRoomDestroyed: (handler) => socket.on(SERVER_EVENTS.ROOM_DESTROYED, handler),
@@ -60,8 +57,6 @@ export function createRoomSocketClient(signalingUrl: string = SIGNALING_URL): Ro
     offSignalIce: (handler: (payload: SignalIceRelayPayload) => void) => socket.off(SERVER_EVENTS.SIGNAL_ICE, handler),
     offHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) =>
       socket.off(SERVER_EVENTS.HOST_RECONNECT_GRACE, handler),
-    offNicknameUpdated: (handler: (payload: NicknameUpdatedPayload) => void) =>
-      socket.off(SERVER_EVENTS.NICKNAME_UPDATED, handler),
     offParticipantKicked: (handler: (payload: ParticipantKickedPayload) => void) =>
       socket.off(SERVER_EVENTS.PARTICIPANT_KICKED, handler),
     offRoomDestroyed: (handler) => socket.off(SERVER_EVENTS.ROOM_DESTROYED, handler),

@@ -344,7 +344,6 @@ Notes:
 | WebRTC Offer | `signal_offer({ roomId, toParticipantId, sdp })` | Validate and relay SDP offer | `signal_offer` to target peer | `INVALID_SIGNAL_PAYLOAD`, `ROOM_NOT_FOUND` | Keep peer in connecting state or renegotiate |
 | WebRTC Answer | `signal_answer({ roomId, toParticipantId, sdp })` | Validate and relay SDP answer | `signal_answer` to target peer | `INVALID_SIGNAL_PAYLOAD`, `ROOM_NOT_FOUND` | Continue handshake or retry |
 | ICE Exchange | `signal_ice({ roomId, toParticipantId, candidate })` | Validate and relay ICE candidate | `signal_ice` to target peer | `INVALID_SIGNAL_PAYLOAD`, `ROOM_NOT_FOUND` | Try recovery/renegotiation on failures |
-| Heartbeat Hook | `heartbeat({ roomId })` | Refresh participant `lastSeenAt` for lifecycle housekeeping | (no direct success event) | `ROOM_NOT_FOUND` | If missing room, reset to entry/destroyed flow |
 | Reconnect Orchestrator | `resume_session({ roomId, reconnectToken })` | Validate token + grace + lifecycle constraints, restore session identity | `session_resumed` (to reconnecting socket); `peer_joined` (to others) | `HOST_RECONNECT_WINDOW_EXPIRED`, `RECONNECT_TOKEN_STALE`, `ROOM_NOT_FOUND` | Restore room or force fresh join with cleared token |
 | Host Kick Action | `kick_participant({ roomId, targetParticipantId })` | Validate host authority, remove kicked socket, emit events to remaining participants | `participant_kicked` broadcast | `ROOM_NOT_FOUND`, `NOT_AUTHORIZED` | Remove participant from local state; kicked peer navigates to room-ended |
 

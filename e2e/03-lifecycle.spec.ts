@@ -136,7 +136,7 @@ test.describe('lifecycle', () => {
     })
   })
 
-  test('join_room is rejected when liveCount is zero (§6.3)', async ({ browser }) => {
+  test('join_room is permitted when liveCount is zero — joiner becomes sole live participant (§1 rule 2, §3)', async ({ browser }) => {
     const hostCtx = await browser.newContext()
     const guestCtx = await browser.newContext()
     const newJoinerCtx = await browser.newContext()
@@ -162,9 +162,8 @@ test.describe('lifecycle', () => {
       await joinerPage.fill('#nickname-input', 'Charlie')
       await joinerPage.getByRole('button', { name: /Join room/i }).click()
 
-      // Server responds with ROOM_NOT_FOUND (masks grace-window state)
-      const alert = joinerPage.getByRole('alert')
-      await expect(alert).toBeVisible({ timeout: 8_000 })
+      // Per spec §3: join is permitted; Charlie becomes the sole live participant
+      await expect(joinerPage.getByText('1 participant')).toBeVisible({ timeout: 8_000 })
     } finally {
       await newJoinerCtx.close()
     }

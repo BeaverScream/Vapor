@@ -3,6 +3,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
+import {
+  SWEEPER_INTERVAL_HOURS,
+  JOIN_RATE_LIMIT_WINDOW_MS,
+  JOIN_RATE_LIMIT_MAX,
+  CREATE_RATE_LIMIT_WINDOW_MS,
+  CREATE_RATE_LIMIT_MAX,
+} from "../src/signaling/contracts";
+import {
+  checkAndRecordCreateAttempt,
+  createRateLimitingContext,
+} from "../src/signaling/handlers/rateLimiting";
 
 const BACKEND_SRC_ROOT = path.resolve(process.cwd(), "src");
 const SIGNALING_CONTRACTS_FILE = path.resolve(process.cwd(), "src/signaling/contracts.ts");
@@ -13,6 +24,13 @@ const SHARED_PAYLOADS_FILE = path.resolve(process.cwd(), "../shared/payloads.ts"
 const SHARED_REASONS_FILE = path.resolve(process.cwd(), "../shared/reasons.ts");
 const METRICS_REGISTRY_FILE = path.resolve(process.cwd(), "src/admin/metricsRegistry.ts");
 const ADMIN_ROUTER_FILE = path.resolve(process.cwd(), "src/admin/createAdminRouter.ts");
+const STATE_FILE = path.resolve(process.cwd(), "src/signaling/state.ts");
+const SHARED_POLICY_FILE = path.resolve(process.cwd(), "../shared/policy.ts");
+const FRONTEND_STATE_UTILS_FILE = path.resolve(process.cwd(), "../frontend/src/features/room/state-utils.ts");
+const FRONTEND_ROOM_SOCKET_CLIENT_FILE = path.resolve(process.cwd(), "../frontend/src/features/room/room-socket-client.ts");
+const FRONTEND_USE_SOCKET_CONNECTION_FILE = path.resolve(process.cwd(), "../frontend/src/features/room/hooks/useSocketConnection.ts");
+const FRONTEND_USE_VAPOR_ROOM_FILE = path.resolve(process.cwd(), "../frontend/src/features/room/useVaporRoom.ts");
+const FRONTEND_TYPES_FILE = path.resolve(process.cwd(), "../frontend/src/features/room/types.ts");
 
 const FORBIDDEN_SECRET_PATTERNS: RegExp[] = [
   /console\.(log|info|debug|warn|error)\([^\n]*password/i,
@@ -184,7 +202,7 @@ test("T1.6-01: lifecycle uses grace + precedence primitives", async () => {
   expectContains(handlers, "HOST_DISCONNECT_GRACE_MS", "host grace timer constant usage");
   expectContains(handlers, "GUEST_DISCONNECT_GRACE_MS", "guest grace timer constant usage");
   expectContains(handlers, "ROOM_MAX_DURATION_MS", "room ttl constant usage");
-  expectContains(handlers, "SOLO_HOST_ROOM_TIMEOUT_MS", "solo timeout constant usage");
+  expectContains(handlers, "SOLO_ROOM_TIMEOUT_MS", "solo timeout constant usage");
 });
 
 // ---- Rate Limiting ----
@@ -224,39 +242,39 @@ test("T3.3-01 (P3-AB-001): temporary blocklist behavior stays RAM-only", async (
   // Blocklist and companion create-attempt tracking are both local Maps — no external store
   expectContains(
     rateLimiting,
-    "temporaryBlocklistBySubject: new Map()",
+    "temporaryBlocklistByIp: new Map()",
     "blocklist declared as in-memory Map inside context factory"
   );
   expectContains(
     rateLimiting,
-    "createAttemptsBySubject: new Map()",
+    "createAttemptsByIp: new Map()",
     "create-attempt counter declared as in-memory Map inside context factory"
   );
 
   // Block expiry is a numeric TTL computed from CREATE_ROOM_BLOCK_DURATION_MS — time-bounded, not permanent
   expectContains(
     rateLimiting,
-    "ctx.temporaryBlocklistBySubject.set(subject, nowTs + CREATE_ROOM_BLOCK_DURATION_MS)",
+    "ctx.temporaryBlocklistByIp.set(ip, nowTs + CREATE_ROOM_BLOCK_DURATION_MS)",
     "block entry stores a computed expiry timestamp, not a permanent flag"
   );
 
   // Sweeper prunes expired blocklist entries so no durable state accumulates
   expectContains(
     rateLimiting,
-    "ctx.temporaryBlocklistBySubject.delete(subject)",
+    "ctx.temporaryBlocklistByIp.delete(ip)",
     "sweeper prunes expired blocklist entries"
   );
 
   // Sweeper also prunes expired create-attempt windows
   expectContains(
     rateLimiting,
-    "ctx.createAttemptsBySubject.delete(subject)",
+    "ctx.createAttemptsByIp.delete(ip)",
     "sweeper prunes expired create-attempt windows"
   );
 
   // Neither state structure is exported directly — accessed only via context object
-  expectNotContains(rateLimiting, "export temporaryBlocklistBySubject", "blocklist must not be exported");
-  expectNotContains(rateLimiting, "export createAttemptsBySubject", "create-attempt state must not be exported");
+  expectNotContains(rateLimiting, "export temporaryBlocklistByIp", "blocklist must not be exported");
+  expectNotContains(rateLimiting, "export createAttemptsByIp", "create-attempt state must not be exported");
 
   // No persistence APIs in the rate limiting module
   for (const pattern of FORBIDDEN_PERSISTENCE_PATTERNS) {
@@ -288,8 +306,8 @@ test("T3.3-05 (P3-AB-005): per-IP abuse counters persist within their RAM window
   );
   expectContains(
     rateLimiting,
-    "IP_ABUSE_WINDOW_MS",
-    "per-IP window constant referenced for expiry check"
+    "signaling.JOIN_RATE_LIMIT_WINDOW_MS",
+    "per-IP window constant sourced from shared spec constant"
   );
 
   // destroyRoom must NOT touch ipAbuseByIp — counters must survive room teardown
@@ -361,4 +379,118 @@ test("T3.3-02 (P3-AB-002): aggregate telemetry snapshot excludes passwords, toke
 
   // Admin metrics endpoint delegates entirely to the snapshot — no extra fields injected
   expectContains(adminRouterContent, "getSnapshot()", "admin /metrics endpoint serves the registry snapshot output only");
+});
+
+// ---- VP-11.2 Spec Constant Alignment ----
+
+test("T11.2-01: shared constants have exactly the spec-mandated values", () => {
+  assert.equal(SWEEPER_INTERVAL_HOURS, 5, "SWEEPER_INTERVAL_HOURS must equal 5 per core-architecture.md §2");
+  assert.equal(JOIN_RATE_LIMIT_WINDOW_MS, 60_000, "JOIN_RATE_LIMIT_WINDOW_MS must equal 60000 ms per spec §2");
+  assert.equal(JOIN_RATE_LIMIT_MAX, 30, "JOIN_RATE_LIMIT_MAX must equal 30 per spec §2");
+  assert.equal(CREATE_RATE_LIMIT_WINDOW_MS, 60_000, "CREATE_RATE_LIMIT_WINDOW_MS must equal 60000 ms per spec §2");
+  assert.equal(CREATE_RATE_LIMIT_MAX, 30, "CREATE_RATE_LIMIT_MAX must equal 30 per spec §2 (raised from 10 by VP-11.8)");
+  // T11.2-04: derived sweep interval must equal 18000000 ms (5 hours)
+  assert.equal(SWEEPER_INTERVAL_HOURS * 60 * 60 * 1000, 18_000_000, "Derived sweep interval must equal 18000000 ms");
+});
+
+test("T11.2-02: replaced local constants fully removed from rateLimiting.ts", async () => {
+  const rateLimiting = await fs.readFile(RATE_LIMITING_FILE, "utf8");
+
+  expectNotContains(rateLimiting, "IP_ABUSE_WINDOW_MS", "old IP_ABUSE_WINDOW_MS constant must not remain");
+  expectNotContains(rateLimiting, "IP_JOIN_THRESHOLD", "old IP_JOIN_THRESHOLD constant must not remain");
+  expectNotContains(rateLimiting, "IP_CREATE_THRESHOLD", "old IP_CREATE_THRESHOLD constant must not remain");
+  expectNotContains(rateLimiting, "CREATE_ATTEMPT_WINDOW_MS", "old CREATE_ATTEMPT_WINDOW_MS constant must not remain");
+
+  // Replacement constants sourced from shared via contracts
+  expectContains(rateLimiting, "signaling.JOIN_RATE_LIMIT_WINDOW_MS", "join window sources from shared constant");
+  expectContains(rateLimiting, "signaling.CREATE_RATE_LIMIT_WINDOW_MS", "create window sources from shared constant");
+  expectContains(rateLimiting, "signaling.JOIN_RATE_LIMIT_MAX", "join threshold sources from shared constant");
+  expectContains(rateLimiting, "signaling.CREATE_RATE_LIMIT_MAX", "create threshold sources from shared constant");
+});
+
+// ---- VP-11.5 Nickname-Update Feature Removal ----
+
+test("T11.5-01: all nickname-update symbols exhaustively removed from backend, shared, and frontend source", async () => {
+  const sharedEvents = await fs.readFile(SHARED_EVENTS_FILE, "utf8");
+  const sharedPayloads = await fs.readFile(SHARED_PAYLOADS_FILE, "utf8");
+  const sharedPolicy = await fs.readFile(SHARED_POLICY_FILE, "utf8");
+  const contracts = await fs.readFile(SIGNALING_CONTRACTS_FILE, "utf8");
+  const handlers = await fs.readFile(SOCKET_HANDLERS_FILE, "utf8");
+  const stateFile = await fs.readFile(STATE_FILE, "utf8");
+  const frontendStateUtils = await fs.readFile(FRONTEND_STATE_UTILS_FILE, "utf8");
+  const frontendSocketClient = await fs.readFile(FRONTEND_ROOM_SOCKET_CLIENT_FILE, "utf8");
+  const frontendUseSocketConnection = await fs.readFile(FRONTEND_USE_SOCKET_CONNECTION_FILE, "utf8");
+  const frontendUseVaporRoom = await fs.readFile(FRONTEND_USE_VAPOR_ROOM_FILE, "utf8");
+  const frontendTypes = await fs.readFile(FRONTEND_TYPES_FILE, "utf8");
+
+  // Wire-format event strings removed from shared/events.ts
+  expectNotContains(sharedEvents, '"nickname_update"', "nickname_update wire event must be removed from shared/events.ts");
+  expectNotContains(sharedEvents, '"nickname_updated"', "nickname_updated wire event must be removed from shared/events.ts");
+  expectNotContains(sharedEvents, "NICKNAME_UPDATE", "NICKNAME_UPDATE symbol must not remain in shared/events.ts");
+  expectNotContains(sharedEvents, "NICKNAME_UPDATED", "NICKNAME_UPDATED symbol must not remain in shared/events.ts");
+
+  // Payload types removed from shared/payloads.ts
+  expectNotContains(sharedPayloads, "NicknameUpdatePayload", "NicknameUpdatePayload must be removed from shared/payloads.ts");
+  expectNotContains(sharedPayloads, "NicknameUpdatedPayload", "NicknameUpdatedPayload must be removed from shared/payloads.ts");
+
+  // Policy constant removed from shared/policy.ts
+  expectNotContains(sharedPolicy, "NICKNAME_CHANGE_COOLDOWN_MS", "NICKNAME_CHANGE_COOLDOWN_MS must be removed from shared/policy.ts");
+
+  // All nickname-update references removed from contracts.ts
+  expectNotContains(contracts, "nicknameUpdate", "nicknameUpdate must not remain in contracts.ts");
+  expectNotContains(contracts, "nicknameUpdated", "nicknameUpdated must not remain in contracts.ts");
+  expectNotContains(contracts, "NICKNAME_CHANGE_COOLDOWN_MS", "NICKNAME_CHANGE_COOLDOWN_MS must not remain in contracts.ts");
+
+  // Handler and state field removed from registerSocketHandlers.ts
+  expectNotContains(handlers, "nickname_update", "nickname_update handler must be removed from registerSocketHandlers.ts");
+  expectNotContains(handlers, "nicknameUpdatedAt", "nicknameUpdatedAt assignment must be removed from registerSocketHandlers.ts");
+
+  // State field removed from state.ts
+  expectNotContains(stateFile, "nicknameUpdatedAt", "nicknameUpdatedAt field must be removed from state.ts");
+
+  // Frontend: withNicknameUpdated removed from state-utils.ts
+  expectNotContains(frontendStateUtils, "withNicknameUpdated", "withNicknameUpdated must be removed from state-utils.ts");
+  expectNotContains(frontendStateUtils, "nicknameUpdatedAt", "nicknameUpdatedAt must not appear in state-utils.ts");
+
+  // Frontend: onNicknameUpdated / offNicknameUpdated removed from room-socket-client.ts
+  expectNotContains(frontendSocketClient, "onNicknameUpdated", "onNicknameUpdated must be removed from room-socket-client.ts");
+  expectNotContains(frontendSocketClient, "offNicknameUpdated", "offNicknameUpdated must be removed from room-socket-client.ts");
+
+  // Frontend: onNicknameUpdated removed from useSocketConnection.ts
+  expectNotContains(frontendUseSocketConnection, "onNicknameUpdated", "onNicknameUpdated must be removed from useSocketConnection.ts");
+
+  // Frontend: onNicknameUpdated removed from useVaporRoom.ts
+  expectNotContains(frontendUseVaporRoom, "onNicknameUpdated", "onNicknameUpdated must be removed from useVaporRoom.ts");
+  expectNotContains(frontendUseVaporRoom, "withNicknameUpdated", "withNicknameUpdated must be removed from useVaporRoom.ts");
+
+  // Frontend: nickname-update symbols removed from types.ts
+  expectNotContains(frontendTypes, "onNicknameUpdated", "onNicknameUpdated must be removed from types.ts");
+  expectNotContains(frontendTypes, "offNicknameUpdated", "offNicknameUpdated must be removed from types.ts");
+  expectNotContains(frontendTypes, "NicknameUpdatedPayload", "NicknameUpdatedPayload must be removed from types.ts");
+});
+
+// ---- VP-11.8 Raise IP Create Rate Limit Threshold ----
+
+test("T11.8-01: CREATE_RATE_LIMIT_MAX constant equals 30", () => {
+  assert.equal(CREATE_RATE_LIMIT_MAX, 30, "CREATE_RATE_LIMIT_MAX must equal 30 per VP-11.8 (raised from legacy 10)");
+});
+
+test("T11.8-02: IP create block triggers at 31st attempt, not 11th", () => {
+  const ip = "192.168.1.100";
+  const windowStart = 0;
+  const nowTs = 1_000; // 1 second into the window — well within the 60-second window
+
+  // Part 1: 11th create from same IP must NOT be rate-limited.
+  // The old threshold was 10; under the new threshold of 30 the 11th attempt is still allowed.
+  const ctx1 = createRateLimitingContext();
+  ctx1.ipAbuseByIp.set(ip, { createCount: 10, joinCount: 0, windowStart });
+  const blocked11th = checkAndRecordCreateAttempt(ctx1, ip, nowTs);
+  assert.equal(blocked11th, false, "11th create from same IP must not be blocked (threshold is 30, not 10)");
+
+  // Part 2: 31st create from same IP within the window MUST be rate-limited.
+  // Pre-populate the context with 30 already-recorded creates so the next call is the 31st.
+  const ctx2 = createRateLimitingContext();
+  ctx2.ipAbuseByIp.set(ip, { createCount: 30, joinCount: 0, windowStart });
+  const blocked31st = checkAndRecordCreateAttempt(ctx2, ip, nowTs);
+  assert.equal(blocked31st, true, "31st create from same IP within 60s window must be rate limited");
 });

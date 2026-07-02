@@ -53,9 +53,8 @@ export function createVaporServer({
       return total;
     },
     getActiveSocketCount: () => state.socketToParticipant.size,
-    getTemporaryBlocklistSize: () => rateLimitCtx.temporaryBlocklistBySubject.size,
-    getRateLimitWindowActiveCount: () =>
-      rateLimitCtx.createAttemptsBySubject.size + rateLimitCtx.joinAttemptByRoomSubject.size,
+    getTemporaryBlocklistSize: () => rateLimitCtx.temporaryBlocklistByIp.size,
+    getRateLimitWindowActiveCount: () => rateLimitCtx.createAttemptsByIp.size,
   });
 
   const metricsAdapter = {

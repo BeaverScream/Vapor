@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   CLIENT_EVENTS,
   SERVER_EVENTS,
-  SOLO_HOST_ROOM_TIMEOUT_MS,
+  SOLO_ROOM_TIMEOUT_MS,
 } from "../src/signaling/contracts";
 import { registerSocketHandlers } from "../src/signaling/registerSocketHandlers";
 import { createSignalingState } from "../src/signaling/state";
@@ -38,6 +38,10 @@ class FakeIo {
     const room = this.roomMembership.get(roomId) ?? new Set<FakeSocket>();
     room.add(socket);
     this.roomMembership.set(roomId, room);
+  }
+
+  leaveRoom(roomId: string, socket: FakeSocket): void {
+    this.roomMembership.get(roomId)?.delete(socket);
   }
 
   emitToRoomExcept(roomId: string, fromSocket: FakeSocket, event: string, payload: EventPayload): void {
@@ -81,6 +85,10 @@ class FakeSocket {
 
   join(roomId: string): void {
     this.io.joinRoom(roomId, this);
+  }
+
+  leave(roomId: string): void {
+    this.io.leaveRoom(roomId, this);
   }
 
   to(roomId: string): { emit: (event: string, payload: EventPayload) => void } {
@@ -189,8 +197,8 @@ test("last guest voluntarily leaves → peer_left carries soloDeadlineAt for the
   );
   assert.equal(
     peerLeft.soloDeadlineAt,
-    TIME + SOLO_HOST_ROOM_TIMEOUT_MS,
-    "soloDeadlineAt must equal now() + SOLO_HOST_ROOM_TIMEOUT_MS",
+    TIME + SOLO_ROOM_TIMEOUT_MS,
+    "soloDeadlineAt must equal now() + SOLO_ROOM_TIMEOUT_MS",
   );
 });
 
@@ -265,8 +273,8 @@ test("kick of last guest still emits soloDeadlineAt in peer_left after restartSo
   );
   assert.equal(
     peerLeft.soloDeadlineAt,
-    TIME + SOLO_HOST_ROOM_TIMEOUT_MS,
-    "soloDeadlineAt equals now() + SOLO_HOST_ROOM_TIMEOUT_MS",
+    TIME + SOLO_ROOM_TIMEOUT_MS,
+    "soloDeadlineAt equals now() + SOLO_ROOM_TIMEOUT_MS",
   );
 });
 
@@ -295,7 +303,7 @@ test("all participants TCP drop → solo timer fires → room destroyed with sol
 
   assert.equal(getSnapshot().roomCount, 1, "room still exists after both TCP drops");
 
-  t.mock.timers.tick(SOLO_HOST_ROOM_TIMEOUT_MS);
+  t.mock.timers.tick(SOLO_ROOM_TIMEOUT_MS);
 
   assert.equal(getSnapshot().roomCount, 0, "room destroyed after solo timer fires");
 
@@ -325,7 +333,7 @@ test("host drops first then guest → solo timer from host disconnect fires → 
 
   assert.equal(getSnapshot().roomCount, 1, "room still exists after both drops");
 
-  t.mock.timers.tick(SOLO_HOST_ROOM_TIMEOUT_MS);
+  t.mock.timers.tick(SOLO_ROOM_TIMEOUT_MS);
 
   assert.equal(getSnapshot().roomCount, 0, "room destroyed after solo timer fires");
 
@@ -411,8 +419,84 @@ test("reconnect with solo host resets the timer", (t) => {
   assert.equal(getSnapshot().roomCount, 1, "room alive after reconnect");
 
   // After reconnect with solo host (liveCount===1), solo timer is restarted.
-  t.mock.timers.tick(SOLO_HOST_ROOM_TIMEOUT_MS);
+  t.mock.timers.tick(SOLO_ROOM_TIMEOUT_MS);
   assert.equal(getSnapshot().roomCount, 0, "room destroyed after reconnected solo-host timer fires");
+});
+
+test("guest resuming as the sole live participant restarts the solo timer and receives soloDeadlineAt (CR11-12)", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+
+  const T0 = 1_000_000;
+  const FIVE_MIN = 5 * 60 * 1000;
+  let clock = T0;
+  const { io, getSnapshot } = setupHarness({ now: () => clock });
+  const host = io.connect("socket-host");
+  const guest = io.connect("socket-guest");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest" });
+  const guestJoined = guest.popEvent(SERVER_EVENTS.roomJoined) as {
+    participantId: string;
+    reconnectToken: string;
+  };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  // Host drops first → host-grace sentinel, solo timer restarts (liveCount → 1).
+  host.triggerDisconnect();
+  guest.popEvent(SERVER_EVENTS.peerLeft); // consume
+
+  // Last guest drops → liveCount → 0; the solo timer from the host drop keeps running.
+  guest.triggerDisconnect();
+  assert.equal(getSnapshot().roomCount, 1, "room still alive after both drop");
+
+  // Five minutes later the GUEST — not the host — resumes as the sole live participant.
+  clock = T0 + FIVE_MIN;
+  const resumeAt = clock;
+  t.mock.timers.tick(FIVE_MIN);
+
+  const reconnectSocket = io.connect("socket-guest-reconnect");
+  reconnectSocket.trigger(CLIENT_EVENTS.resumeSession, {
+    roomId: roomCreated.roomId,
+    reconnectToken: guestJoined.reconnectToken,
+  });
+
+  const resumed = reconnectSocket.popEvent(SERVER_EVENTS.roomJoined) as
+    | { participantId: string; soloDeadlineAt?: number | null }
+    | undefined;
+
+  assert.ok(resumed, "guest reconnect succeeds");
+  assert.equal(resumed?.participantId, guestJoined.participantId, "guest resumed its own identity");
+  assert.equal(popError(reconnectSocket), undefined, "no error on guest resume");
+  // CR11-12: a guest resuming solo must receive a fresh, numeric soloDeadlineAt — not null.
+  assert.ok(
+    typeof resumed?.soloDeadlineAt === "number",
+    "guest resuming as sole live participant must receive a numeric soloDeadlineAt (was null before CR11-12 fix)",
+  );
+  assert.equal(
+    resumed?.soloDeadlineAt,
+    resumeAt + SOLO_ROOM_TIMEOUT_MS,
+    "soloDeadlineAt must be a fresh window measured from the resume time (timer restarted, participant-agnostic)",
+  );
+
+  // The timer must have been RESTARTED, not left on its original deadline: ticking past the
+  // original host-drop deadline (T0 + SOLO_ROOM_TIMEOUT_MS) must NOT destroy the room.
+  clock = T0 + SOLO_ROOM_TIMEOUT_MS;
+  t.mock.timers.tick(SOLO_ROOM_TIMEOUT_MS - FIVE_MIN);
+  assert.equal(
+    getSnapshot().roomCount,
+    1,
+    "room survives past the original deadline — the guest resume restarted the solo timer",
+  );
+
+  // The room is destroyed only when the fresh window (resumeAt + SOLO) elapses.
+  clock = resumeAt + SOLO_ROOM_TIMEOUT_MS;
+  t.mock.timers.tick(FIVE_MIN);
+  assert.equal(getSnapshot().roomCount, 0, "room destroyed once the restarted solo timer fires");
+  const destroyed = reconnectSocket.popEvent(SERVER_EVENTS.roomDestroyed) as { reason: string } | undefined;
+  assert.ok(destroyed, "resumed guest receives room_destroyed");
+  assert.equal(destroyed?.reason, "solo_timeout_expired", "destroy reason is solo_timeout_expired");
 });
 
 // ---- Solo timer: host-alone TCP drop ----
@@ -432,7 +516,7 @@ test("host TCP drops when alone → solo timer from creation fires → room dest
 
   assert.equal(getSnapshot().roomCount, 1, "room still alive after host TCP drop (grace windows active)");
 
-  t.mock.timers.tick(SOLO_HOST_ROOM_TIMEOUT_MS);
+  t.mock.timers.tick(SOLO_ROOM_TIMEOUT_MS);
 
   assert.equal(getSnapshot().roomCount, 0, "room destroyed by solo timer (not by the longer host grace)");
 
