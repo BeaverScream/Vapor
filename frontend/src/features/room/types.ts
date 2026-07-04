@@ -13,6 +13,7 @@ import {
   type RoomDestroyedPayload as SharedRoomDestroyedPayload,
   type RoomDestroyedReason as SharedRoomDestroyedReason,
   type RoomJoinedPayload as SharedRoomJoinedPayload,
+  type SessionResumedPayload as SharedSessionResumedPayload,
   type SocketErrorPayload as SharedSocketErrorPayload,
   type SignalAnswerPayload as SharedSignalAnswerPayload,
   type SignalAnswerRelayPayload as SharedSignalAnswerRelayPayload,
@@ -37,6 +38,7 @@ export const CLIENT_EVENTS = {
 export const SERVER_EVENTS = {
   ROOM_CREATED: SERVER_EVENT_NAMES.ROOM_CREATED,
   ROOM_JOINED: SERVER_EVENT_NAMES.ROOM_JOINED,
+  SESSION_RESUMED: SERVER_EVENT_NAMES.SESSION_RESUMED,
   PEER_JOINED: SERVER_EVENT_NAMES.PEER_JOINED,
   PEER_LEFT: SERVER_EVENT_NAMES.PEER_LEFT,
   SIGNAL_OFFER: SERVER_EVENT_NAMES.SIGNAL_OFFER,
@@ -130,6 +132,8 @@ export type KickParticipantRequest = Required<KickParticipantPayload>
 
 export type RoomJoinedPayload = SharedRoomJoinedPayload
 
+export type SessionResumedPayload = SharedSessionResumedPayload
+
 export type PeerJoinedPayload = SharedPeerJoinedPayload
 
 export type PeerLeftPayload = SharedPeerLeftPayload
@@ -194,6 +198,7 @@ export interface RoomSocketClient {
   onDisconnect: (handler: () => void) => void
   onRoomCreated: (handler: (payload: RoomCreatedPayload) => void) => void
   onRoomJoined: (handler: (payload: RoomJoinedPayload) => void) => void
+  onSessionResumed: (handler: (payload: SessionResumedPayload) => void) => void
   onPeerJoined: (handler: (payload: PeerJoinedPayload) => void) => void
   onPeerLeft: (handler: (payload: PeerLeftPayload) => void) => void
   onHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) => void
@@ -207,6 +212,7 @@ export interface RoomSocketClient {
   offDisconnect: (handler: () => void) => void
   offRoomCreated: (handler: (payload: RoomCreatedPayload) => void) => void
   offRoomJoined: (handler: (payload: RoomJoinedPayload) => void) => void
+  offSessionResumed: (handler: (payload: SessionResumedPayload) => void) => void
   offPeerJoined: (handler: (payload: PeerJoinedPayload) => void) => void
   offPeerLeft: (handler: (payload: PeerLeftPayload) => void) => void
   offHostReconnectGrace: (handler: (payload: HostReconnectGracePayload) => void) => void

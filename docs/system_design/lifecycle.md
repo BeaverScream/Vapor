@@ -180,7 +180,7 @@ sequenceDiagram
         S->>S: Cancel host grace timer
         S->>S: Restore socketId
         S->>S: Cancel solo timer if liveCount ≥ 2, or restart it if host is again the sole live participant (liveCount = 1)
-        S-->>H: room_joined { roomId, peers[], expiresAt,\nsoloDeadlineAt, participantCount, … }
+        S-->>H: session_resumed { roomId, peers[], expiresAt,\nsoloDeadlineAt, participantCount, … }
         S-->>G: peer_joined { participantId: host, nickname }
         G->>G: Remove grace banner
     else Grace expires (60 min)
@@ -211,7 +211,7 @@ sequenceDiagram
         S->>S: Validate token + check grace window
         S->>S: Cancel guest grace timer
         S->>S: Cancel solo/empty-room timer if liveCount rises
-        S-->>G: room_joined { roomId, peers[], expiresAt, … }
+        S-->>G: session_resumed { roomId, peers[], expiresAt, … }
         S-->>O: peer_joined { participantId: guest, nickname }
     else Grace expires (30 min)
         S->>S: Evict guest (remove from roster)
@@ -232,8 +232,10 @@ flowchart TD
 
     EMIT --> RESULT{Server response}
 
-    RESULT -->|room_joined| ROOM[Restore In-Room state\nRestore chat history from sessionStorage]
-    RESULT -->|ROOM_NOT_FOUND| FAIL[Clear token + local chat\nRoom Ended — session unrecoverable]
+    RESULT -->|session_resumed| ROOM[Restore In-Room state\nRestore chat history from sessionStorage]
+    RESULT -->|"ROOM_NOT_FOUND\n(room destroyed or malformed payload)"| FAIL[Clear token + local chat\nRoom Ended — session unrecoverable]
+    RESULT -->|"RECONNECT_TOKEN_STALE\n(unknown token, guest grace expired,\nor evicted during grace)"| FAIL
+    RESULT -->|"HOST_RECONNECT_WINDOW_EXPIRED\n(host grace closed, room still live)"| FAIL
     RESULT -->|"INVALID_PASSWORD\n(password rotated since drop)"| FAIL
 
     FAIL --> LOBBY

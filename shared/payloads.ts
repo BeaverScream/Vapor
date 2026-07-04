@@ -93,6 +93,13 @@ export type RoomJoinedPayload = {
   roomName?: string;
 };
 
+// Resume response to the reconnecting participant. Extends RoomJoinedPayload so it
+// always carries everything a join delivers (incl. the rotated reconnectToken);
+// hostReconnectGraceDeadlineAt is present only while a host grace window is active.
+export type SessionResumedPayload = RoomJoinedPayload & {
+  hostReconnectGraceDeadlineAt?: number;
+};
+
 export type PeerJoinedPayload = {
   participantId: string;
   nickname?: string | null;

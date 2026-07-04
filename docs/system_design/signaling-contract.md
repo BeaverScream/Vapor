@@ -60,7 +60,7 @@ if (error.code === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND) { ... }
 - `room_created({ roomId, participantId, hostId, participantNickname, reconnectToken, expiresAt, soloDeadlineAt, participantCount, hasPassword, roomName? })`
 - `room_joined({ roomId, participantId, hostId, participantNickname, peers, reconnectToken, expiresAt, soloDeadlineAt, participantCount, hasPassword, roomName? })`
   - `peers: Array<{ participantId: string; nickname: string | null; isHost: boolean }>`
-- `session_resumed({ roomId, participantId, hostId, participantNickname, peers, expiresAt, soloDeadlineAt, hostReconnectGraceDeadlineAt, participantCount, hasPassword, roomName? })` — sent to the reconnecting participant on successful `resume_session`
+- `session_resumed({ roomId, participantId, hostId, participantNickname, peers, reconnectToken, expiresAt, soloDeadlineAt, hostReconnectGraceDeadlineAt, participantCount, hasPassword, roomName? })` — sent to the reconnecting participant on successful `resume_session`; `reconnectToken` is the rotated token replacing the one consumed by the resume
   - `peers: Array<{ participantId: string; nickname: string | null; isHost: boolean }>`
 - `peer_joined({ participantId, nickname, participantCount })`
 - `peer_left({ participantId, reason, participantCount, soloDeadlineAt? })` — `reason: "disconnect" | "leave" | "kick"`; `soloDeadlineAt` is included when the solo timer (re)starts as a result of this event

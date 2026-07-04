@@ -13,6 +13,7 @@ export const CLIENT_EVENT_NAMES = {
 export const SERVER_EVENT_NAMES = {
   ROOM_CREATED: "room_created",
   ROOM_JOINED: "room_joined",
+  SESSION_RESUMED: "session_resumed",
   PEER_JOINED: "peer_joined",
   PEER_LEFT: "peer_left",
   SIGNAL_OFFER: "signal_offer",

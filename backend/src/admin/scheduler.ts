@@ -30,6 +30,8 @@ const ZERO_BASELINE: RawCounters = {
     ROOM_NOT_FOUND: 0,
     ROOM_FULL: 0,
     NOT_AUTHORIZED: 0,
+    RECONNECT_TOKEN_STALE: 0,
+    HOST_RECONNECT_WINDOW_EXPIRED: 0,
   },
   peakConcurrentRooms: 0,
   peakConcurrentParticipants: 0,

@@ -8,6 +8,7 @@ import type {
   RoomDestroyedReason,
   RoomJoinedPayload,
   RoomSessionState,
+  SessionResumedPayload,
 } from './types'
 import { UI_COPY } from './constants'
 import { hasParticipant } from './participant-utils'
@@ -111,6 +112,15 @@ export function withRoomJoined(state: RoomSessionState, payload: RoomJoinedPaylo
     chatConnectionState: nextParticipants.length > 1 ? 'connecting' : 'idle',
     participantNicknames,
     hasPassword: payload.hasPassword ?? false,
+  }
+}
+
+export function withSessionResumed(state: RoomSessionState, payload: SessionResumedPayload): RoomSessionState {
+  // Strict superset of the join transition: the grace deadline is applied after so
+  // it overrides the null that clearSessionFields (inside withRoomJoined) writes.
+  return {
+    ...withRoomJoined(state, payload),
+    hostReconnectGraceDeadlineAt: payload.hostReconnectGraceDeadlineAt ?? null,
   }
 }
 

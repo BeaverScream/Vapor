@@ -16,6 +16,7 @@ export const CLIENT_EVENTS = {
 export const SERVER_EVENTS = {
   roomCreated: shared.SERVER_EVENT_NAMES.ROOM_CREATED,
   roomJoined: shared.SERVER_EVENT_NAMES.ROOM_JOINED,
+  sessionResumed: shared.SERVER_EVENT_NAMES.SESSION_RESUMED,
   peerJoined: shared.SERVER_EVENT_NAMES.PEER_JOINED,
   peerLeft: shared.SERVER_EVENT_NAMES.PEER_LEFT,
   signalOffer: shared.SERVER_EVENT_NAMES.SIGNAL_OFFER,
@@ -79,6 +80,7 @@ export type {
   RoomJoinedPayload,
   RoomPasswordUpdatePayload,
   RoomPasswordUpdatedPayload,
+  SessionResumedPayload,
   KickParticipantPayload,
   ParticipantKickedPayload,
   SocketErrorPayload

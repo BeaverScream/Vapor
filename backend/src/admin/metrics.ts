@@ -9,7 +9,9 @@ export type MetricsErrorCode =
   | "INVALID_PASSWORD"
   | "ROOM_NOT_FOUND"
   | "ROOM_FULL"
-  | "NOT_AUTHORIZED";
+  | "NOT_AUTHORIZED"
+  | "RECONNECT_TOKEN_STALE"
+  | "HOST_RECONNECT_WINDOW_EXPIRED";
 
 export type MetricsSnapshot = {
   activeRooms: number;
@@ -58,6 +60,8 @@ export function createMetrics(getState: MetricsStateAccessor) {
     ROOM_NOT_FOUND: 0,
     ROOM_FULL: 0,
     NOT_AUTHORIZED: 0,
+    RECONNECT_TOKEN_STALE: 0,
+    HOST_RECONNECT_WINDOW_EXPIRED: 0,
   };
   let roomLifetimeTotalMs = 0;
   let roomLifetimeCount = 0;

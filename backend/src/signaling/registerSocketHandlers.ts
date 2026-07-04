@@ -18,6 +18,7 @@ import type {
   RoomJoinedPayload,
   RoomPasswordUpdatePayload,
   RoomPasswordUpdatedPayload,
+  SessionResumedPayload,
 } from "./contracts";
 import type { SignalingState } from "./state";
 import {
@@ -156,6 +157,14 @@ export function registerSocketHandlers({
   const emitNotAuthorized = (socket: Socket): void => {
     metrics.incrementErrorCount?.("NOT_AUTHORIZED");
     emitSocketError(socket, signaling.ERROR_CODES.notAuthorized);
+  };
+  const emitReconnectTokenStale = (socket: Socket): void => {
+    metrics.incrementErrorCount?.("RECONNECT_TOKEN_STALE");
+    emitSocketError(socket, signaling.ERROR_CODES.reconnectTokenStale);
+  };
+  const emitHostReconnectWindowExpired = (socket: Socket): void => {
+    metrics.incrementErrorCount?.("HOST_RECONNECT_WINDOW_EXPIRED");
+    emitSocketError(socket, signaling.ERROR_CODES.hostReconnectWindowExpired);
   };
 
   // Shorthand helpers that bind the context objects
@@ -570,19 +579,31 @@ export function registerSocketHandlers({
           const reconnectHash = reconnect.hashReconnectToken(reconnectToken);
           const reconnectRecord = reconnectCtx.reconnectByHash.get(reconnectHash);
           if (!reconnectRecord || reconnectRecord.roomId !== roomId) {
-            emitRoomNotFound(socket);
+            emitReconnectTokenStale(socket);
             return;
           }
 
-                  if (!reconnectRecord.disconnected || now() > reconnectRecord.validUntil) {
-            emitRoomNotFound(socket);
-            return;
-          }
-
+          // Room lookup precedes the disconnected/expired checks: room.hostId is
+          // needed to classify an expired grace as host vs guest, and a destroyed
+          // room must map to ROOM_NOT_FOUND even when the grace also expired.
           const room = state.rooms.get(roomId);
           const auth = passwordAuth.getRoomAuth(authCtx, roomId);
           if (!room || !auth) {
             emitRoomNotFound(socket);
+            return;
+          }
+
+          if (!reconnectRecord.disconnected) {
+            emitReconnectTokenStale(socket);
+            return;
+          }
+
+          if (now() > reconnectRecord.validUntil) {
+            if (room.hostId === reconnectRecord.participantId) {
+              emitHostReconnectWindowExpired(socket);
+            } else {
+              emitReconnectTokenStale(socket);
+            }
             return;
           }
 
@@ -593,7 +614,7 @@ export function registerSocketHandlers({
 
           const participant = room.participants.get(reconnectRecord.participantId);
           if (!participant) {
-            emitRoomNotFound(socket);
+            emitReconnectTokenStale(socket);
             return;
           }
 
@@ -627,7 +648,7 @@ export function registerSocketHandlers({
           const policy = graceCtx.roomPolicyById.get(roomId);
           // Idle timer is participant-agnostic (lifecycle.md §1 Rule 8, §3).
           const resumeSoloDeadlineAt = reconcileIdleTimer(roomId, resumeLiveCount);
-          const roomJoinedPayload: RoomJoinedPayload = {
+          const sessionResumedPayload: SessionResumedPayload = {
             roomId,
             participantId: reconnectRecord.participantId,
             hostId: room.hostId,
@@ -639,9 +660,14 @@ export function registerSocketHandlers({
             hasPassword: !!auth.passwordHash,
             roomName: room.roomName,
             ...(resumeSoloDeadlineAt !== null ? { soloDeadlineAt: resumeSoloDeadlineAt } : {}),
+            // Present only while a host grace window is active (a resuming host
+            // cleared its own grace above, so this is absent on host self-resume).
+            ...(policy?.hostGraceDeadlineAt !== undefined
+              ? { hostReconnectGraceDeadlineAt: policy.hostGraceDeadlineAt }
+              : {}),
           };
 
-          socket.emit(signaling.SERVER_EVENTS.roomJoined, roomJoinedPayload);
+          socket.emit(signaling.SERVER_EVENTS.sessionResumed, sessionResumedPayload);
 
           socket.to(roomId).emit(signaling.SERVER_EVENTS.peerJoined, {
             participantId: reconnectRecord.participantId,

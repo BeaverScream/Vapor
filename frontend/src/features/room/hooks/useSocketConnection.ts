@@ -8,6 +8,7 @@ import type {
   RoomDestroyedPayload,
   RoomJoinedPayload,
   RoomSocketClient,
+  SessionResumedPayload,
   SignalAnswerRelayPayload,
   SignalIceRelayPayload,
   SignalOfferRelayPayload,
@@ -19,6 +20,7 @@ export type SocketEventHandlers = {
   onDisconnect: () => void
   onRoomCreated: (payload: RoomCreatedPayload) => void
   onRoomJoined: (payload: RoomJoinedPayload) => void
+  onSessionResumed: (payload: SessionResumedPayload) => void
   onPeerJoined: (payload: PeerJoinedPayload) => void
   onPeerLeft: (payload: PeerLeftPayload) => void
   onSignalOffer: (payload: SignalOfferRelayPayload) => void
@@ -52,6 +54,7 @@ export function useSocketConnection(
     const onDisconnect = (): void => handlersRef.current.onDisconnect()
     const onRoomCreated = (p: RoomCreatedPayload): void => handlersRef.current.onRoomCreated(p)
     const onRoomJoined = (p: RoomJoinedPayload): void => handlersRef.current.onRoomJoined(p)
+    const onSessionResumed = (p: SessionResumedPayload): void => handlersRef.current.onSessionResumed(p)
     const onPeerJoined = (p: PeerJoinedPayload): void => handlersRef.current.onPeerJoined(p)
     const onPeerLeft = (p: PeerLeftPayload): void => handlersRef.current.onPeerLeft(p)
     const onSignalOffer = (p: SignalOfferRelayPayload): void => handlersRef.current.onSignalOffer(p)
@@ -66,6 +69,7 @@ export function useSocketConnection(
     socket.onDisconnect(onDisconnect)
     socket.onRoomCreated(onRoomCreated)
     socket.onRoomJoined(onRoomJoined)
+    socket.onSessionResumed(onSessionResumed)
     socket.onPeerJoined(onPeerJoined)
     socket.onPeerLeft(onPeerLeft)
     socket.onSignalOffer(onSignalOffer)
@@ -81,6 +85,7 @@ export function useSocketConnection(
       socket.offDisconnect(onDisconnect)
       socket.offRoomCreated(onRoomCreated)
       socket.offRoomJoined(onRoomJoined)
+      socket.offSessionResumed(onSessionResumed)
       socket.offPeerJoined(onPeerJoined)
       socket.offPeerLeft(onPeerLeft)
       socket.offSignalOffer(onSignalOffer)

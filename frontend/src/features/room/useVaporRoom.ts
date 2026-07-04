@@ -28,6 +28,7 @@ import {
   withRoomIdInput,
   withRoomNameInput,
   withRoomJoined,
+  withSessionResumed,
   withSocketState,
 } from './state-utils'
 import { VaporWebRtcChatMesh, type WebRtcTelemetryEvent } from './webrtc-chat-mesh'
@@ -44,6 +45,7 @@ import type {
   RoomSocketClient,
   RoomSessionActions,
   RoomSessionState,
+  SessionResumedPayload,
   SignalAnswerRelayPayload,
   SignalIceRelayPayload,
   SignalOfferRelayPayload,
@@ -308,6 +310,33 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     [createPeerMesh, requestPermission],
   )
 
+  const onSessionResumed = useCallback(
+    (payload: SessionResumedPayload): void => {
+      persistence.writeStoredReconnectSession({
+        roomId: payload.roomId,
+        reconnectToken: payload.reconnectToken,
+      })
+      resumeInFlightRef.current = false
+      autoResumeRequestedRef.current = false
+      // Same pending-drop rationale as onRoomJoined: never re-flush messages queued
+      // before the involuntary drop (VP-10.4.4).
+      chat.clearPending()
+      const restoredChat = loadChatHistory(payload.roomId)
+      setState((previous) => {
+        const resumed = withSessionResumed(previous, payload)
+        // Restore the local snapshot in the same transition so no intermediate
+        // empty-chat commit can overwrite stored history (VP-10.4.3).
+        return restoredChat.length > 0 ? { ...resumed, chatMessages: restoredChat } : resumed
+      })
+      const peerMesh = createPeerMesh(payload.roomId, payload.participantId)
+      peerMesh.syncPeers(payload.peers.map((peer) => peer.participantId))
+      requestPermission()
+    },
+    // resumeInFlightRef / autoResumeRequestedRef are stable React refs, not reactive deps — do not add them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [createPeerMesh, requestPermission],
+  )
+
   const onPeerJoined = useCallback((payload: PeerJoinedPayload): void => {
     setState((previous) => {
       let nextState = withPeerJoined(previous, payload)
@@ -420,6 +449,28 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   )
 
   const onError = useCallback((payload: SocketErrorPayload): void => {
+    // Uncaught resume-failure edge (VP-12.3): a resume failed while the UI still
+    // shows the room and autoResumeRequestedRef was already cleared. Both codes are
+    // emitted exclusively by the resume path, so this guard cannot misfire for other
+    // flows. Teardown runs outside the state updater (StrictMode-safe) so
+    // clearRoomSession can dispose the live-but-useless peer mesh.
+    const resumeErrorCode = mapErrorCode(payload.code)
+    if (
+      (resumeErrorCode === SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE ||
+        resumeErrorCode === SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED) &&
+      !autoResumeRequestedRef.current &&
+      stateRef.current.screen === 'room'
+    ) {
+      clearChatHistory(stateRef.current.activeRoomId)
+      persistence.clearStoredReconnectSession()
+      clearRoomSession()
+      setState((previous) => ({
+        ...withRoomEnded(previous),
+        roomEndedMessage: getErrorMessage(resumeErrorCode),
+      }))
+      return
+    }
+
     setState((previous) => {
       const errorCode = mapErrorCode(payload.code)
 
@@ -497,7 +548,9 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
 
       return withLobbyError(previous, getErrorMessage(errorCode))
     })
-  }, [])
+    // autoResumeRequestedRef / stateRef are stable React refs, not reactive deps — do not add them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearRoomSession])
 
   useSocketConnection(
     socketRef,
@@ -507,6 +560,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       onDisconnect,
       onRoomCreated,
       onRoomJoined,
+      onSessionResumed,
       onPeerJoined,
       onPeerLeft,
       onSignalOffer,

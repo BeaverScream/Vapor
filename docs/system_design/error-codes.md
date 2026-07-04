@@ -10,12 +10,12 @@ This is a closed set. Do not add a new code without updating `shared/error-codes
 
 | Code | When emitted |
 |---|---|
-| `ROOM_NOT_FOUND` | Room ID/name doesn't exist, was destroyed, or has `liveCount === 0` |
+| `ROOM_NOT_FOUND` | Room ID/name doesn't exist or was destroyed; on `resume_session`: malformed payload (missing roomId/token) or valid token whose room has been destroyed |
 | `ROOM_FULL` | Room already has the max 5 participants |
 | `ROOM_EXPIRED` | Room TTL has passed |
 | `INVALID_PASSWORD` | Wrong password, or empty/missing password for a protected room |
-| `HOST_RECONNECT_WINDOW_EXPIRED` | Resume attempted after the host grace window closed |
-| `RECONNECT_TOKEN_STALE` | Token hash doesn't match the stored record (e.g. guest grace expired) |
+| `HOST_RECONNECT_WINDOW_EXPIRED` | Host `resume_session` after the host grace window (`validUntil`) closed while the room still exists |
+| `RECONNECT_TOKEN_STALE` | `resume_session` with a token whose hash has no record (or a record for a different room), whose participant is still connected, whose guest grace window expired, or whose participant is no longer in the roster (e.g. kicked during grace) |
 | `RATE_LIMITED` | Create/join rate limit, create-burst, or memory-pressure rejection |
 | `INVALID_SIGNAL_PAYLOAD` | Malformed SDP/ICE payload, invalid nickname format, nickname already taken by an active participant, or invalid/duplicate room name |
 | `NOT_AUTHORIZED` | Non-host attempted a host-only action (e.g. kick) |
