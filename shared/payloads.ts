@@ -16,6 +16,9 @@ export type JoinRoomPayload = {
 export type ResumeSessionPayload = {
   roomId?: string;
   reconnectToken?: string;
+  // Capability negotiation keeps resume compatible with pre-session_resumed
+  // clients. Missing or non-true values request the legacy room_joined response.
+  supportsSessionResumed?: boolean;
 };
 
 export type RoomPasswordUpdatePayload = {
@@ -83,12 +86,13 @@ export type RoomJoinedPayload = {
   roomId: string;
   participantId: string;
   hostId: string;
-  peers: Array<{ participantId: string; nickname?: string | null }>;
+  peers: Array<{ participantId: string; nickname: string | null; isHost: boolean }>;
   reconnectToken: string | null;
   expiresAt: number;
   soloDeadlineAt?: number | null;
   participantNickname?: string | null;
   participantCount: number;
+  reconnectingCount?: number;
   hasPassword?: boolean;
   roomName?: string;
 };
@@ -104,12 +108,14 @@ export type PeerJoinedPayload = {
   participantId: string;
   nickname?: string | null;
   participantCount: number;
+  reconnectingCount?: number;
 };
 
 export type PeerLeftPayload = {
   participantId: string;
   reason: "disconnect" | "leave" | "kick";
   participantCount: number;
+  reconnectingCount?: number;
   soloDeadlineAt?: number | null;
 };
 

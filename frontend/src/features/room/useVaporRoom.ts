@@ -101,6 +101,16 @@ function emitSafeWebRtcTelemetry(event: WebRtcTelemetryEvent): void {
   window.dispatchEvent(new CustomEvent('vapor:webrtc-state', { detail: event }))
 }
 
+function isTerminalResumeError(errorCode: ReturnType<typeof mapErrorCode>): boolean {
+  return (
+    errorCode === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND ||
+    errorCode === SIGNALING_ERROR_CODES.INVALID_PASSWORD ||
+    errorCode === SIGNALING_ERROR_CODES.RATE_LIMITED ||
+    errorCode === SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE ||
+    errorCode === SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED
+  )
+}
+
 export function getSoloWaitingText(soloDeadlineAt: number | null, nowMs: number): string | null {
   if (soloDeadlineAt === null || soloDeadlineAt === undefined) return null
   const remainingMs = Math.max(soloDeadlineAt - nowMs, 0)
@@ -122,8 +132,25 @@ export function getLifetimeText(expiresAt: number | null, nowMs: number): string
   const totalSeconds = Math.floor(remainingMs / 1000)
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
-  if (minutes >= 10) return `Ends in ${minutes}m`
+  if (remainingMs > 10 * 60 * 1000) return `Ends in ${minutes}m`
   return `Ends in ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+}
+
+export function getHostReconnectGraceText(deadlineAt: number | null, nowMs: number): string | null {
+  if (
+    deadlineAt === null ||
+    !Number.isFinite(deadlineAt) ||
+    deadlineAt <= 0 ||
+    !Number.isFinite(nowMs)
+  ) {
+    return null
+  }
+  const remainingMs = deadlineAt - nowMs
+  if (remainingMs <= 0) return null
+  const totalSeconds = Math.floor(remainingMs / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `Host disconnected · reconnect window ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
 }
 
 interface UseVaporRoomDependencies {
@@ -170,6 +197,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   const autoResumeRequestedRef = useRef(false)
 
   const peerMeshRef = useRef<VaporWebRtcChatMesh | null>(null)
+  const peerRepairPendingRef = useRef(false)
 
   // Sub-hooks
   const persistence = useSessionPersistence()
@@ -185,6 +213,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   const chat = useChatMessaging(peerMeshRef, stateRef, setState, typing.notifyTypingStop)
 
   const clearRoomSession = useCallback((): void => {
+    peerRepairPendingRef.current = false
     disposePeerMesh()
     chat.clearPending()
     typing.clearAll()
@@ -247,7 +276,10 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
 
     resumeInFlightRef.current = true
     autoResumeRequestedRef.current = true
-    socketRef.current?.emitResumeSession(storedSession)
+    socketRef.current?.emitResumeSession({
+      ...storedSession,
+      supportsSessionResumed: true,
+    })
     // socketRef / socketStateRef / resumeInFlightRef / autoResumeRequestedRef are stable React refs, not reactive deps — do not add them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persistence.readStoredReconnectSession])
@@ -359,21 +391,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     // data channels survive a peer (e.g. host) departure. Without this, a missing
     // or stuck guest↔guest connection is never repaired and those guests can no
     // longer exchange messages once the shared peer leaves (VP-10.2).
-    const previousState = stateRef.current
-    const remainingPeerIds = previousState.participants
-      .map((participant) => participant.participantId)
-      .filter(
-        (participantId) =>
-          participantId !== previousState.participantId && participantId !== payload.participantId,
-      )
-    tracePeer('peer_left', {
-      left: payload.participantId,
-      reason: payload.reason,
-      remainingPeerIds,
-    })
-    if (remainingPeerIds.length > 0) {
-      peerMeshRef.current?.syncPeers(remainingPeerIds)
-    }
+    peerRepairPendingRef.current = true
     setState((previous) => {
       const name = previous.participantNicknames[payload.participantId] ?? payload.participantId.slice(0, 8)
       const action = payload.reason === 'disconnect' ? 'disconnected' : payload.reason === 'kick' ? 'was removed' : 'left'
@@ -393,6 +411,18 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       return nextState
     })
   }, [chat.pendingMessagesRef])
+
+  useEffect(() => {
+    if (!peerRepairPendingRef.current) return
+    peerRepairPendingRef.current = false
+    const remainingPeerIds = state.participants
+      .map((participant) => participant.participantId)
+      .filter((participantId) => participantId !== state.participantId)
+    tracePeer('peer_left_commit_repair', { remainingPeerIds })
+    if (remainingPeerIds.length > 0) {
+      peerMeshRef.current?.syncPeers(remainingPeerIds)
+    }
+  }, [state.participantId, state.participants])
 
   const onSignalOffer = useCallback(
     (payload: SignalOfferRelayPayload): void => {
@@ -449,79 +479,43 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
   )
 
   const onError = useCallback((payload: SocketErrorPayload): void => {
-    // Uncaught resume-failure edge (VP-12.3): a resume failed while the UI still
-    // shows the room and autoResumeRequestedRef was already cleared. Both codes are
-    // emitted exclusively by the resume path, so this guard cannot misfire for other
-    // flows. Teardown runs outside the state updater (StrictMode-safe) so
-    // clearRoomSession can dispose the live-but-useless peer mesh.
-    const resumeErrorCode = mapErrorCode(payload.code)
-    if (
-      (resumeErrorCode === SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE ||
-        resumeErrorCode === SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED) &&
-      !autoResumeRequestedRef.current &&
+    const errorCode = mapErrorCode(payload.code)
+    const isDefensiveVisibleResumeFailure =
+      (errorCode === SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE ||
+        errorCode === SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED) &&
       stateRef.current.screen === 'room'
+
+    // A terminal resume failure makes the saved session unusable. Capture its room
+    // ID before clearing storage because cold reconnecting has not populated
+    // activeRoomId (CR12-10). Teardown runs outside the updater so a live mesh is
+    // disposed without relying on updater execution (CR12-15).
+    if (
+      isTerminalResumeError(errorCode) &&
+      (autoResumeRequestedRef.current ||
+        stateRef.current.screen === 'reconnecting' ||
+        stateRef.current.screen === 'room-ended' ||
+        isDefensiveVisibleResumeFailure)
     ) {
-      clearChatHistory(stateRef.current.activeRoomId)
+      const storedRoomId = persistence.readStoredReconnectSession()?.roomId ?? stateRef.current.activeRoomId
+      clearChatHistory(storedRoomId)
       persistence.clearStoredReconnectSession()
       clearRoomSession()
       setState((previous) => ({
         ...withRoomEnded(previous),
-        roomEndedMessage: getErrorMessage(resumeErrorCode),
+        roomEndedMessage: getErrorMessage(errorCode),
       }))
       return
     }
 
+    if (autoResumeRequestedRef.current) {
+      autoResumeRequestedRef.current = false
+      resumeInFlightRef.current = false
+    }
+
     setState((previous) => {
-      const errorCode = mapErrorCode(payload.code)
-
-      if (autoResumeRequestedRef.current) {
-        autoResumeRequestedRef.current = false
-        resumeInFlightRef.current = false
-
-        // Captured before the reconnect session is cleared below — during resume the
-        // room id lives in the stored session, not yet in state.
-        const storedRoomId = persistence.readStoredReconnectSession()?.roomId ?? previous.activeRoomId
-
-        // A failed/stale resume means the user can no longer return to that room
-        // (guest grace expiry, room gone, etc.) — treat as a leave and clear both
-        // the local chat snapshot (VP-10.4.5) and the now-unusable reconnect token
-        // so a later auto-resume cannot retry the dead session (CR10-2).
-        if (
-          errorCode === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND ||
-          errorCode === SIGNALING_ERROR_CODES.INVALID_PASSWORD ||
-          errorCode === SIGNALING_ERROR_CODES.RATE_LIMITED ||
-          errorCode === SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE ||
-          errorCode === SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED
-        ) {
-          clearChatHistory(storedRoomId)
-          persistence.clearStoredReconnectSession()
-        }
-
-        if (
-          errorCode === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND ||
-          errorCode === SIGNALING_ERROR_CODES.INVALID_PASSWORD ||
-          errorCode === SIGNALING_ERROR_CODES.RATE_LIMITED ||
-          errorCode === SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE ||
-          errorCode === SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED
-        ) {
-          return resetToLobby(previous)
-        }
-      }
-
-      // Defensive: same StrictMode ref-timing symptom — autoResumeRequestedRef was cleared
-      // before the async error resolved. Gate destructive teardown on the fatal resume codes
-      // only; non-fatal / unknown errors still return to lobby but preserve the session token.
+      // Unknown/non-terminal reconnect errors retain the saved reconnect record
+      // and preserve the pre-existing deterministic lobby fallback.
       if (previous.screen === 'reconnecting') {
-        const isResumeTerminalError =
-          errorCode === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND ||
-          errorCode === SIGNALING_ERROR_CODES.INVALID_PASSWORD ||
-          errorCode === SIGNALING_ERROR_CODES.RATE_LIMITED ||
-          errorCode === SIGNALING_ERROR_CODES.RECONNECT_TOKEN_STALE ||
-          errorCode === SIGNALING_ERROR_CODES.HOST_RECONNECT_WINDOW_EXPIRED
-        if (isResumeTerminalError) {
-          clearChatHistory(previous.activeRoomId)
-          persistence.clearStoredReconnectSession()
-        }
         return resetToLobby(previous)
       }
 
@@ -548,7 +542,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
 
       return withLobbyError(previous, getErrorMessage(errorCode))
     })
-    // autoResumeRequestedRef / stateRef are stable React refs, not reactive deps — do not add them.
+    // autoResumeRequestedRef / stateRef are stable React refs, not reactive deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearRoomSession])
 
@@ -707,13 +701,6 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
     () => getChatStatusText(state.chatConnectionState, state.connectedPeerCount, state.participantCount),
     [state.chatConnectionState, state.connectedPeerCount, state.participantCount],
   )
-  const effectiveExpiresAt = useMemo(() => {
-    const deadlines = [state.expiresAt, state.hostReconnectGraceDeadlineAt, state.soloDeadlineAt].filter(
-      (d): d is number => d !== null,
-    )
-    return deadlines.length === 0 ? null : Math.min(...deadlines)
-  }, [state.expiresAt, state.hostReconnectGraceDeadlineAt, state.soloDeadlineAt])
-
   const actions = useMemo<RoomSessionActions>(
     () => ({
       setLobbyMode,
@@ -759,7 +746,7 @@ export function useVaporRoom(dependencies: UseVaporRoomDependencies = {}): {
       joinRateLimitHint,
       roomStatus,
       connectionText,
-      expiresAt: effectiveExpiresAt,
+      expiresAt: state.expiresAt,
       soloDeadlineAt: state.soloDeadlineAt,
       chatStatusText,
     },

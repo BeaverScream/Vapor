@@ -140,7 +140,9 @@ test('T2.2-01: frontend resume-session flow includes race guard and deterministi
   expectContains(types, 'ResumeSessionRequest', 'resume request contract type')
   expectContains(useRoom, 'resumeInFlightRef', 'resume race guard ref')
   expectContains(useRoom, 'autoResumeRequestedRef', 'auto resume state guard ref')
-  expectContains(useRoom, 'socketRef.current?.emitResumeSession(storedSession)', 'resume_session emit path')
+  expectContains(useRoom, 'socketRef.current?.emitResumeSession({', 'resume_session emit path')
+  expectContains(useRoom, '...storedSession', 'stored resume identity fields')
+  expectContains(useRoom, 'supportsSessionResumed: true', 'session_resumed capability advertisement')
   expectContains(useRoom, 'clearStoredReconnectSession()', 'token cleanup path')
   expectContains(constants, 'RECONNECT_SESSION_STORAGE_KEY', 'sessionStorage key constant')
 })
@@ -221,17 +223,18 @@ test('T1.5-01: room participant model and UI expose explicit host labeling', asy
   expectContains(types, 'isHost: boolean', 'participant host identity field')
   expectContains(roomView, 'Host', 'host badge text')
   expectContains(roomView, 'You (Host)', 'self-host explicit badge text')
-  expectContains(stateUtils, 'participant.participantId === payload.hostId', 'host role mapped from explicit hostId payload')
+  expectContains(stateUtils, 'isHost: participant.isHost', 'peer host role preserved from the wire payload')
+  expectContains(stateUtils, 'payload.participantId === payload.hostId', 'self host role derived from explicit hostId payload')
 })
 
-test('T1.7-01: room lifetime text keeps >=10m compact and <10m strict zero-padded mm:ss', async () => {
+test('T1.7-01: room lifetime text keeps >10m compact and <=10m strict zero-padded mm:ss', async () => {
   const useRoom = await readFile(useRoomFile, 'utf8')
 
-  expectContains(useRoom, 'if (minutes >= 10)', '>=10 minutes compact branch')
-  expectContains(useRoom, "return `Ends in ${minutes}m`", '>=10 minutes text format')
+  expectContains(useRoom, 'if (remainingMs > 10 * 60 * 1000)', '>10 minutes compact branch')
+  expectContains(useRoom, "return `Ends in ${minutes}m`", '>10 minutes text format')
   expectContains(useRoom, "minutes.toString().padStart(2, '0')", 'zero-padded minute formatting')
   expectContains(useRoom, "seconds.toString().padStart(2, '0')", 'zero-padded second formatting')
-  expectContains(useRoom, "return `Ends in ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`", 'strict mm:ss display under 10 minutes')
+  expectContains(useRoom, "return `Ends in ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`", 'strict mm:ss display at or below 10 minutes')
 })
 
 // ---- Lifecycle ----
@@ -424,4 +427,23 @@ test('T3.1-05 (P3-SH-005): per-room lock serializes password updates and resume-
 
   // room_password_update handler must be declared async so the lock await is valid
   expectContains(handlers, 'async (payload: RoomPasswordUpdatePayload', 'room_password_update handler declared async')
+})
+
+// ---- VP-12.3 Resume session contract ----
+
+test('S12.3-12/13/14: supplemental source contract for resume recovery paths', async () => {
+  const useRoom = await readFile(useRoomFile, 'utf8')
+  const socketClient = await readFile(roomSocketClientFile, 'utf8')
+  const types = await readFile(typesFile, 'utf8')
+
+  expectContains(types, 'SESSION_RESUMED', 'session_resumed frontend event constant')
+  expectContains(socketClient, 'onSessionResumed', 'session_resumed socket listener')
+  expectContains(useRoom, 'withSessionResumed(previous, payload)', 'dedicated resume state transition')
+  expectContains(useRoom, 'stateRef.current.screen === \'room\'', 'already-visible room resume-failure guard')
+  expectContains(useRoom, 'clearRoomSession()', 'already-visible dead room disposes the mesh')
+  expectContains(useRoom, 'roomEndedMessage: getErrorMessage(resumeErrorCode)', 'guard uses granular resume error copy')
+
+  for (const code of ['ROOM_NOT_FOUND', 'INVALID_PASSWORD', 'RATE_LIMITED', 'RECONNECT_TOKEN_STALE', 'HOST_RECONNECT_WINDOW_EXPIRED']) {
+    expectContains(useRoom, `SIGNALING_ERROR_CODES.${code}`, `terminal auto-resume error ${code}`)
+  }
 })

@@ -53,7 +53,7 @@ Purpose: in-room interaction state.
 
 Required elements:
 - Room header: room identifier + copy-to-clipboard button + Room TTL timer.
-- Participant count with expandable participant list.
+- Capacity-aware participant count with expandable live-participant list.
 - Leave button (always visible).
 - Chat area: scrollable message history + text input + send button.
 - Typing indicator: shows which peer(s) are currently typing (P2P, not server-mediated).
@@ -62,6 +62,8 @@ Participant list details:
 - Each entry shows color-coded nickname.
 - Host-only: kick button rendered next to each non-host participant.
 - Nicknames are color-coded per participant for quick identification in chat.
+- The roster contains live participants only. Grace-held reconnecting sessions reserve capacity but do not appear as live roster entries.
+- Capacity text is `N connected` when no sessions are reconnecting and `N connected · M reconnecting` when grace-held sessions exist; `N + M` never exceeds the five-person room limit.
 
 Chat area details:
 - Outgoing messages right-aligned; incoming messages left-aligned.
@@ -216,7 +218,7 @@ Lobby:
 - Helper: `Data disappears when the room ends.`
 
 In-room:
-- Top row: `Room {ROOM_ID}` + participant count (`x/5`)
+- Top row: `Room {ROOM_ID}` + capacity-aware participant count (`N connected`, or `N connected · M reconnecting` while grace-held sessions reserve slots; `N + M ≤ 5`)
 - Status line: `Connected` / `Waiting for peers…`
 - Primary footer action: `Leave room`
 
@@ -276,7 +278,7 @@ In-room + transitions:
 
 Error copy (deterministic):
 - `ROOM_NOT_FOUND` -> `Room not found.`
-- `ROOM_FULL` -> `Room is full (5 max).`
+- `ROOM_FULL` -> `Room is at capacity — some slots are held for reconnecting participants.`
 - `ROOM_EXPIRED` -> `Room expired.`
 - `INVALID_PASSWORD` -> `Incorrect password.`
 - `RATE_LIMITED` -> `Too many attempts. Try again later.`
@@ -341,7 +343,7 @@ Notes:
 | WebRTC Offer | `signal_offer({ roomId, toParticipantId, sdp })` | Validate and relay SDP offer | `signal_offer` to target peer | `INVALID_SIGNAL_PAYLOAD`, `ROOM_NOT_FOUND` | Keep peer in connecting state or renegotiate |
 | WebRTC Answer | `signal_answer({ roomId, toParticipantId, sdp })` | Validate and relay SDP answer | `signal_answer` to target peer | `INVALID_SIGNAL_PAYLOAD`, `ROOM_NOT_FOUND` | Continue handshake or retry |
 | ICE Exchange | `signal_ice({ roomId, toParticipantId, candidate })` | Validate and relay ICE candidate | `signal_ice` to target peer | `INVALID_SIGNAL_PAYLOAD`, `ROOM_NOT_FOUND` | Try recovery/renegotiation on failures |
-| Reconnect Orchestrator | `resume_session({ roomId, reconnectToken })` | Validate token + grace + lifecycle constraints, restore session identity | `session_resumed` (to reconnecting socket); `peer_joined` (to others) | `HOST_RECONNECT_WINDOW_EXPIRED`, `RECONNECT_TOKEN_STALE`, `ROOM_NOT_FOUND` | Restore room or force fresh join with cleared token |
+| Reconnect Orchestrator | `resume_session({ roomId, reconnectToken, supportsSessionResumed?: boolean })` | Validate token + grace + lifecycle constraints, restore session identity, and select the acknowledged success event from the advertised client capability | `session_resumed` when `supportsSessionResumed: true`, otherwise legacy `room_joined` (exactly one to the reconnecting socket); `peer_joined` (exactly one to others) | `HOST_RECONNECT_WINDOW_EXPIRED`, `RECONNECT_TOKEN_STALE`, `ROOM_NOT_FOUND` | Restore room or force fresh join with cleared token |
 | Host Kick Action | `kick_participant({ roomId, targetParticipantId })` | Validate host authority, remove kicked socket, emit events to remaining participants | `participant_kicked` broadcast | `ROOM_NOT_FOUND`, `NOT_AUTHORIZED` | Remove participant from local state; kicked peer navigates to room-ended |
 
 Cross-cutting inbound events used by room UI:
@@ -370,9 +372,9 @@ Leave:
 3. Guest leave → backend emits `peer_left` to remaining participants; if the guest was the last live participant (host in grace), the room enters the empty-room timer (see [lifecycle.md](./lifecycle.md) §3) rather than being destroyed immediately, and is destroyed with `solo_timeout_expired` only if no one returns.
 
 Resume:
-1. Frontend emits `resume_session` with stored token.
+1. Frontend emits `resume_session` with stored token and `supportsSessionResumed: true`; older clients may omit the capability.
 2. Backend validates grace/token/lifecycle constraints.
-3. On success: `session_resumed` to reconnecting socket; `peer_joined` to others.
+3. On success: exactly one `session_resumed` to a capability-advertising reconnecting socket, or exactly one legacy `room_joined` when the capability is absent; exactly one `peer_joined` is sent to others.
 4. On failure: frontend clears token and returns to lobby with deterministic error.
 
 ### 10.4 Contract Naming Lock

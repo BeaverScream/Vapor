@@ -8,6 +8,7 @@ const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1'
 const appTsx             = readFileSync(resolve(ROOT, 'src/App.tsx'), 'utf8')
 const roomView           = readFileSync(resolve(ROOT, 'src/features/room/RoomView.tsx'), 'utf8')
 const roomViewDesktop    = readFileSync(resolve(ROOT, 'src/features/room/RoomViewDesktop.tsx'), 'utf8')
+const participantUtils   = readFileSync(resolve(ROOT, 'src/features/room/participant-utils.ts'), 'utf8')
 
 // ---- T8.6-03: App.tsx routes by layout mode ----
 
@@ -132,4 +133,29 @@ test('T8.6-09c: both views share the same prop name for the kick handler (no for
   const mobileHasIt  = roomView.includes('onKickParticipant')
   const desktopHasIt = roomViewDesktop.includes('onKickParticipant')
   assert.ok(mobileHasIt && desktopHasIt, 'both RoomView and RoomViewDesktop must use onKickParticipant (identical props interface)')
+})
+
+// ---- VP-12.5 peers[].isHost roster rendering ----
+
+test('S12.5-06: supplemental source contract for roster host affordances', () => {
+  for (const [name, source] of [['RoomView', roomView], ['RoomViewDesktop', roomViewDesktop]]) {
+    assert.ok(
+      source.includes('participant.isHost'),
+      `${name} must render its host indicator from the Participant.isHost state field`,
+    )
+    assert.ok(
+      source.includes('<CrownIcon />'),
+      `${name} must retain the host crown indicator`,
+    )
+  }
+})
+
+// ---- VP-12.8 host-grace visibility ----
+
+test('S12.8-08: supplemental source contract for host-grace room status', () => {
+  assert.ok(participantUtils.includes("return 'Host disconnected. Waiting for host to reconnect…'"), 'getRoomStatus must retain the host reconnect grace message')
+  assert.ok(participantUtils.includes('if (hostReconnectGraceDeadlineAt !== null)'), 'host grace status must be driven directly by its deadline')
+  for (const [name, source] of [['RoomView', roomView], ['RoomViewDesktop', roomViewDesktop]]) {
+    assert.ok(source.includes('roomStatus'), `${name} must render the shared host-grace room status`)
+  }
 })

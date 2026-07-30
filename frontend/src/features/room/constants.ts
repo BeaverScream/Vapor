@@ -52,6 +52,6 @@ export const UI_COPY = {
   GENERIC_ERROR: 'Could not connect. Try again.',
   JOIN_RATE_LIMITED: 'Too many join attempts. Try again in a minute.',
   SOLO_HOST_WARNING: 'Solo room expires if no guest joins in',
-  INVALID_NICKNAME: 'Nickname must be 3–24 characters (letters, numbers, spaces, - or _).',
+  INVALID_NICKNAME: 'Nickname must be 3–24 characters (letters, numbers, single spaces, ., - or _).',
   KICKED_FROM_ROOM: 'You were removed from this room by the host.',
 } as const

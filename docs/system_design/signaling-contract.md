@@ -53,17 +53,19 @@ if (error.code === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND) { ... }
 - `signal_offer({ roomId, toParticipantId, sdp })`
 - `signal_answer({ roomId, toParticipantId, sdp })`
 - `signal_ice({ roomId, toParticipantId, candidate })`
-- `resume_session({ roomId, reconnectToken })`
+- `resume_session({ roomId, reconnectToken, supportsSessionResumed? })`
+  - New clients send `supportsSessionResumed: true` and receive `session_resumed`.
+  - Missing, false, or malformed capability values identify a legacy client, which receives the same successful resume payload on `room_joined`. Exactly one success event is emitted.
 - `kick_participant({ roomId, targetParticipantId })` — host-only; evicts the specified participant
 
 **Server → Client**
 - `room_created({ roomId, participantId, hostId, participantNickname, reconnectToken, expiresAt, soloDeadlineAt, participantCount, hasPassword, roomName? })`
-- `room_joined({ roomId, participantId, hostId, participantNickname, peers, reconnectToken, expiresAt, soloDeadlineAt, participantCount, hasPassword, roomName? })`
+- `room_joined({ roomId, participantId, hostId, participantNickname, peers, reconnectToken, expiresAt, soloDeadlineAt, participantCount, reconnectingCount?, hasPassword, roomName? })`
   - `peers: Array<{ participantId: string; nickname: string | null; isHost: boolean }>`
-- `session_resumed({ roomId, participantId, hostId, participantNickname, peers, reconnectToken, expiresAt, soloDeadlineAt, hostReconnectGraceDeadlineAt, participantCount, hasPassword, roomName? })` — sent to the reconnecting participant on successful `resume_session`; `reconnectToken` is the rotated token replacing the one consumed by the resume
+- `session_resumed({ roomId, participantId, hostId, participantNickname, peers, reconnectToken, expiresAt, soloDeadlineAt, hostReconnectGraceDeadlineAt, participantCount, reconnectingCount?, hasPassword, roomName? })` — sent to a capability-advertising reconnecting participant on successful `resume_session`; `reconnectToken` is the rotated token replacing the one consumed by the resume
   - `peers: Array<{ participantId: string; nickname: string | null; isHost: boolean }>`
-- `peer_joined({ participantId, nickname, participantCount })`
-- `peer_left({ participantId, reason, participantCount, soloDeadlineAt? })` — `reason: "disconnect" | "leave" | "kick"`; `soloDeadlineAt` is included when the solo timer (re)starts as a result of this event
+- `peer_joined({ participantId, nickname, participantCount, reconnectingCount? })`
+- `peer_left({ participantId, reason, participantCount, reconnectingCount?, soloDeadlineAt? })` — `reason: "disconnect" | "leave" | "kick"`; `soloDeadlineAt` is included when the solo timer (re)starts as a result of this event
 - `host_reconnect_grace({ deadlineAt })` — broadcast to remaining live participants when host disconnects
 - `room_destroyed({ reason })`
 - `participant_kicked({ participantId })` — broadcast to remaining live participants (after kicked socket is removed) when a participant is evicted by the host
@@ -113,6 +115,8 @@ if (error.code === SIGNALING_ERROR_CODES.ROOM_NOT_FOUND) { ... }
 - `peers` in `room_joined` and `session_resumed` is `Array<{ participantId: string; nickname: string | null; isHost: boolean }>`.
 - `soloDeadlineAt` is included in `room_created`, `room_joined`, `session_resumed`, and `peer_left` payloads where applicable.
 - `participantCount` is included in `peer_joined` and `peer_left` — reflects the live participant count after the join/departure is applied.
+- `reconnectingCount` is included in `room_joined`, `session_resumed`, `peer_joined`, and `peer_left` — reflects grace-held disconnected participant slots after the event is applied.
+- Resume success is capability-negotiated: `supportsSessionResumed === true` selects `session_resumed`; otherwise the server selects legacy `room_joined`. The payload data is equivalent except that only `session_resumed` exposes `hostReconnectGraceDeadlineAt`.
 
 ## 6) Adoption
 
@@ -155,7 +159,7 @@ sequenceDiagram
     end
 ```
 
-**Note E — `INVALID_SIGNAL_PAYLOAD` on `create_room`.** Returned when the nickname fails format validation (3–24 characters; letters, numbers, spaces, `_`, `-` only; no control/invisible Unicode characters), or when the optional `roomName` is syntactically invalid or already taken by an active room.
+**Note E — `INVALID_SIGNAL_PAYLOAD` on `create_room`.** Returned when the nickname fails format validation (3–24 characters; letters, numbers, single spaces, `_`, `-`, `.`; no control/invisible Unicode characters), or when the optional `roomName` is syntactically invalid or already taken by an active room.
 
 ### Join Room
 
@@ -167,7 +171,7 @@ sequenceDiagram
 
     C->>S: join_room { roomId|roomName, password?, nickname }
 
-    alt Room not found or liveCount = 0
+    alt Room missing or destroyed
         S-->>C: error { code: ROOM_NOT_FOUND }
     else Room full (5 participants)
         S-->>C: error { code: ROOM_FULL }
@@ -189,7 +193,7 @@ sequenceDiagram
     end
 ```
 
-**Note F — `INVALID_SIGNAL_PAYLOAD` on `join_room`.** Returned when the nickname fails format validation (same rules as creation), or when the nickname is already held by a participant in that room — whether **currently connected** or **disconnected but still within their grace window**. A grace-window nickname stays reserved for its holder so they can reclaim it on `resume_session`; the new joiner must choose a different nickname. The reservation is released only on grace-window expiry, eviction, or room destruction.
+**Note F — `INVALID_SIGNAL_PAYLOAD` on `join_room`.** Returned when the nickname fails format validation (same rules as creation), or when the nickname is already held by a participant in that room — whether **currently connected** or **disconnected but still within their grace window**. A grace-window nickname stays reserved for its holder so they can reclaim it on `resume_session`; the new joiner must choose a different nickname. The reservation is released only on grace-window expiry, eviction, or room destruction. A room with `liveCount === 0` remains joinable during its 15-minute empty-room window; a successful join makes the new participant the sole live participant and restarts the idle timer.
 
 ### WebRTC Peer Mesh Setup
 

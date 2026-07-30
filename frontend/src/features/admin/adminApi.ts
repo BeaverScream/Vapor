@@ -1,7 +1,17 @@
 import { SIGNALING_URL } from '../room/constants'
 
 type DestroyReason = 'host_left' | 'host_grace_expired' | 'room_ttl_expired' | 'solo_timeout_expired'
-type MetricsErrorCode = 'RATE_LIMITED' | 'INVALID_PASSWORD' | 'ROOM_NOT_FOUND' | 'ROOM_FULL' | 'NOT_AUTHORIZED'
+export const METRICS_ERROR_CODES = [
+  'RATE_LIMITED',
+  'INVALID_PASSWORD',
+  'ROOM_NOT_FOUND',
+  'ROOM_FULL',
+  'NOT_AUTHORIZED',
+  'RECONNECT_TOKEN_STALE',
+  'HOST_RECONNECT_WINDOW_EXPIRED',
+] as const
+
+type MetricsErrorCode = (typeof METRICS_ERROR_CODES)[number]
 
 // Mirrors backend/src/admin/metrics.ts MetricsSnapshot — keep in sync.
 export interface MetricsSnapshot {

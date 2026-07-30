@@ -13,6 +13,16 @@ import type {
 import { UI_COPY } from './constants'
 import { hasParticipant } from './participant-utils'
 
+function normalizeReconnectingCount(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0
+    ? value
+    : 0
+}
+
+function normalizeDeadline(value: number | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
+
 export function createInitialRoomSessionState(screen: RoomSessionState['screen'] = 'lobby'): RoomSessionState {
   return {
     lobbyMode: 'create',
@@ -32,6 +42,7 @@ export function createInitialRoomSessionState(screen: RoomSessionState['screen']
     soloDeadlineAt: null,
     participants: [],
     participantCount: 0,
+    reconnectingCount: 0,
     chatMessages: [],
     chatDraft: '',
     chatConnectionState: 'idle',
@@ -79,7 +90,7 @@ export function withRoomCreated(state: RoomSessionState, payload: RoomCreatedPay
 export function withRoomJoined(state: RoomSessionState, payload: RoomJoinedPayload): RoomSessionState {
   const nextParticipants: Participant[] = payload.peers.map((participant) => ({
     participantId: participant.participantId,
-    isHost: participant.participantId === payload.hostId,
+    isHost: participant.isHost,
   }))
 
   if (!hasParticipant(nextParticipants, payload.participantId)) {
@@ -109,6 +120,7 @@ export function withRoomJoined(state: RoomSessionState, payload: RoomJoinedPaylo
     soloDeadlineAt: payload.soloDeadlineAt ?? null,
     participants: nextParticipants,
     participantCount: payload.participantCount,
+    reconnectingCount: normalizeReconnectingCount(payload.reconnectingCount),
     chatConnectionState: nextParticipants.length > 1 ? 'connecting' : 'idle',
     participantNicknames,
     hasPassword: payload.hasPassword ?? false,
@@ -120,7 +132,7 @@ export function withSessionResumed(state: RoomSessionState, payload: SessionResu
   // it overrides the null that clearSessionFields (inside withRoomJoined) writes.
   return {
     ...withRoomJoined(state, payload),
-    hostReconnectGraceDeadlineAt: payload.hostReconnectGraceDeadlineAt ?? null,
+    hostReconnectGraceDeadlineAt: normalizeDeadline(payload.hostReconnectGraceDeadlineAt),
   }
 }
 
@@ -137,6 +149,7 @@ export function withPeerJoined(state: RoomSessionState, payload: PeerJoinedPaylo
     ...state,
     participants,
     participantCount: payload.participantCount,
+    reconnectingCount: normalizeReconnectingCount(payload.reconnectingCount),
     soloDeadlineAt: null,
     participantNicknames,
   }
@@ -147,6 +160,7 @@ export function withPeerLeft(state: RoomSessionState, payload: PeerLeftPayload):
     ...state,
     participants: state.participants.filter((participant) => participant.participantId !== payload.participantId),
     participantCount: payload.participantCount,
+    reconnectingCount: normalizeReconnectingCount(payload.reconnectingCount),
   }
 }
 
@@ -189,7 +203,7 @@ export function withChatConnectionState(
 export function withHostReconnectGrace(state: RoomSessionState, deadlineAt: number): RoomSessionState {
   return {
     ...state,
-    hostReconnectGraceDeadlineAt: deadlineAt,
+    hostReconnectGraceDeadlineAt: normalizeDeadline(deadlineAt),
   }
 }
 
@@ -266,6 +280,7 @@ function clearSessionFields(): Partial<RoomSessionState> {
     soloDeadlineAt: null,
     participants: [],
     participantCount: 0,
+    reconnectingCount: 0,
     chatMessages: [],
     chatDraft: '',
     chatConnectionState: 'idle',

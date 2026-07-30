@@ -83,11 +83,11 @@ A room reaches `liveCount === 0` when the last live participant disconnects, or 
 - **When idle timer (re)starts**: `soloDeadlineAt` included in the triggering `peer_left` payload (or in `room_created` for the initial creation timer).
 
 ### Frontend timer display
-Frontend derives `effectiveExpiresAt = min(expiresAt, hostReconnectGraceDeadlineAt, soloDeadlineAt)` (filtering nulls) and displays a single countdown. Only the shortest active deadline is shown.
+Each deadline has one UI surface. `RoomLifetimeChip` displays the room TTL from `expiresAt` only; `SoloWaitingChip` exclusively displays `soloDeadlineAt`; and active host reconnect grace is surfaced by a distinct persistent banner with its own second-ticking countdown. No deadline changes the countdown displayed by another surface.
 
 ### Frontend session persistence (reconnect on refresh)
 - Reconnect token is stored in `sessionStorage` during an active room session.
-- On mount (including browser refresh within the same tab), if a stored session exists the UI starts in a `'reconnecting'` state and immediately sends `resume_session`.
+- On mount (including browser refresh within the same tab), if a stored session exists the UI starts in a `'reconnecting'` state and immediately sends `resume_session` with `supportsSessionResumed: true`. Servers use the optional capability to return `session_resumed` to new clients and legacy `room_joined` to older clients.
 - `sessionStorage` is explicitly cleared on voluntary leave, room destruction, or participant kick.
 - React 18 StrictMode double-invokes effects; `clearStoredReconnectSession` must **not** be called inside the cleanup of the initial mount effect to avoid wiping the token before the second-mount reconnect attempt.
 

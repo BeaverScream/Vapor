@@ -366,6 +366,19 @@ export class VaporWebRtcChatMesh {
 
   private async startOffer(peerId: string): Promise<void> {
     const connection = this.ensurePeerConnection(peerId)
+    const staleChannel = this.dataChannels.get(peerId)
+
+    if (
+      staleChannel &&
+      (staleChannel.readyState === 'closed' || staleChannel.readyState === 'closing')
+    ) {
+      staleChannel.onopen = null
+      staleChannel.onclose = null
+      staleChannel.onerror = null
+      staleChannel.onmessage = null
+      staleChannel.close()
+      this.dataChannels.delete(peerId)
+    }
 
     if (!this.dataChannels.has(peerId)) {
       const channel = connection.createDataChannel(DATA_CHANNEL_LABEL, {

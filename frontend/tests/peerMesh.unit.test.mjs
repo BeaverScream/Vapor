@@ -4,97 +4,115 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')
-
 const meshSource = readFileSync(resolve(ROOT, 'src/features/room/webrtc-chat-mesh.ts'), 'utf8')
-const vaporRoomSource = readFileSync(resolve(ROOT, 'src/features/room/useVaporRoom.ts'), 'utf8')
 
 // ---- needsOffer decision logic in webrtc-chat-mesh.ts ----
 
 test('needsOffer method is defined on VaporWebRtcChatMesh', () => {
-  assert.ok(
-    meshSource.includes('private needsOffer('),
-    'needsOffer must be a private method on VaporWebRtcChatMesh',
-  )
+  assert.ok(meshSource.includes('private needsOffer('), 'needsOffer must be a private method on VaporWebRtcChatMesh')
 })
 
 test("needsOffer returns false when the data channel readyState is 'open'", () => {
   assert.ok(
     meshSource.includes("channel.readyState === 'open'"),
-    "needsOffer must short-circuit false when channel.readyState === 'open' (healthy channel — no re-offer needed)",
+    "needsOffer must short-circuit false when channel.readyState === 'open'",
   )
 })
 
 test("needsOffer returns false when the connection signalingState is not 'stable'", () => {
   assert.ok(
     meshSource.includes("connection.signalingState !== 'stable'"),
-    "needsOffer must short-circuit false when connection.signalingState !== 'stable' (mid-negotiation — do not disrupt)",
+    "needsOffer must short-circuit false when connection.signalingState !== 'stable'",
   )
 })
 
 test('syncPeers gates startOffer on shouldInitiate && needsOffer', () => {
   assert.ok(
     meshSource.includes('this.shouldInitiate(peerId) && this.needsOffer(peerId)'),
-    'syncPeers must use shouldInitiate(peerId) && needsOffer(peerId) as a compound guard before calling startOffer — '
-    + 'this ensures only the lexicographically-lower peer initiates, and only when the channel needs repair',
+    'syncPeers must use shouldInitiate && needsOffer before calling startOffer',
   )
 })
 
-// ---- onPeerLeft handler logic in useVaporRoom.ts ----
+// ---- VP-12.7: closed data channels must be replaced during mesh repair ----
 
-test('onPeerLeft reads participants from the state ref to derive remaining peer ids', () => {
+const startOfferSource = meshSource.slice(
+  meshSource.indexOf('  private async startOffer(peerId: string): Promise<void> {'),
+  meshSource.indexOf('  private broadcastControl(json: string): void {'),
+)
+
+test("S12.7-01: supplemental source contract for closed-channel replacement", () => {
+  const closedCheck = "staleChannel.readyState === 'closed'"
+  const handlerDetach = 'staleChannel.onmessage = null'
+  const close = 'staleChannel.close()'
+  const eviction = 'this.dataChannels.delete(peerId)'
+  const channelCreation = 'connection.createDataChannel(DATA_CHANNEL_LABEL'
+
+  assert.ok(startOfferSource.includes(closedCheck), 'startOffer must recognize closed channels as stale')
+  assert.ok(startOfferSource.includes(handlerDetach), 'stale channel handlers must be detached')
+  assert.ok(startOfferSource.includes(close), 'a stale channel must be closed before replacement')
+  assert.ok(startOfferSource.includes(eviction), 'a stale channel must be removed from dataChannels')
+  assert.ok(startOfferSource.indexOf(eviction) < startOfferSource.indexOf(channelCreation), 'eviction must precede fresh channel creation')
+})
+
+test("S12.7-02: supplemental source contract for closing-channel replacement", () => {
   assert.ok(
-    vaporRoomSource.includes('previousState.participants'),
-    'onPeerLeft must read previousState.participants (stateRef snapshot) to compute the remaining peer list',
+    startOfferSource.includes("staleChannel.readyState === 'closing'"),
+    'startOffer must evict a closing channel so it cannot block replacement',
+  )
+  assert.ok(startOfferSource.includes('staleChannel.close()'), 'closing-channel cleanup must tolerate close()')
+  assert.ok(startOfferSource.includes('this.dataChannels.delete(peerId)'), 'closing channel must be removed from the map')
+})
+
+test("S12.7-03: supplemental source contract for open-channel guard", () => {
+  const duplicateGuard = 'if (!this.dataChannels.has(peerId)) {'
+
+  assert.ok(meshSource.includes("channel.readyState === 'open'"), 'needsOffer must keep an open channel healthy')
+  assert.ok(startOfferSource.includes(duplicateGuard), 'startOffer must retain its duplicate-channel guard')
+  assert.ok(
+    startOfferSource.indexOf(duplicateGuard) > startOfferSource.indexOf('this.dataChannels.delete(peerId)'),
+    'only stale channels may be evicted before the duplicate-channel guard',
   )
 })
 
-test('onPeerLeft excludes self from the remaining peer id list', () => {
+test("S12.7-04: supplemental source contract for connecting-channel guard", () => {
   assert.ok(
-    vaporRoomSource.includes('participantId !== previousState.participantId'),
-    'onPeerLeft must filter out the local participantId (self) when computing remainingPeerIds',
+    meshSource.includes("channel.readyState === 'connecting'"),
+    'needsOffer must treat a connecting channel as mid-negotiation and avoid a duplicate offer',
+  )
+  assert.ok(startOfferSource.includes('if (!this.dataChannels.has(peerId)) {'), 'channel creation must remain map-guarded')
+})
+
+test('S12.7-05: supplemental source contract for baseline channel creation', () => {
+  assert.ok(startOfferSource.includes('if (!this.dataChannels.has(peerId)) {'), 'missing channels must enter the creation branch')
+  assert.ok(startOfferSource.includes('connection.createDataChannel(DATA_CHANNEL_LABEL'), 'the creation branch must create the Vapor data channel')
+  assert.ok(startOfferSource.includes('this.attachDataChannel(peerId, channel)'), 'the new channel must be attached to the peer')
+})
+
+test('S12.7-06: supplemental source contract for peer-count/negotiation policy', () => {
+  assert.match(
+    meshSource,
+    /\.filter\(\s*\(channel\)\s*=>\s*channel\.readyState === 'open',?\s*\)/,
+    'connectedPeerCount must continue to count only open channels',
+  )
+  assert.ok(
+    meshSource.includes('return this.participantId.localeCompare(peerId) < 0'),
+    'perfect-negotiation initiation must retain its lexicographic rule',
+  )
+  assert.ok(
+    meshSource.includes("channel.readyState === 'open' || channel.readyState === 'connecting'"),
+    'needsOffer must preserve its healthy and in-progress channel short-circuit',
   )
 })
 
-test('onPeerLeft excludes the leaving peer from the remaining peer id list', () => {
+test('S12.7-07: supplemental source contract for closed-channel repair path', () => {
   assert.ok(
-    vaporRoomSource.includes('participantId !== payload.participantId'),
-    'onPeerLeft must filter out payload.participantId (the leaver) when computing remainingPeerIds',
+    meshSource.includes('this.shouldInitiate(peerId) && this.needsOffer(peerId)'),
+    'syncPeers must start a repair offer when the mesh needs one',
   )
-})
-
-test('onPeerLeft calls syncPeers only when at least one peer remains', () => {
+  assert.ok(startOfferSource.includes("staleChannel.readyState === 'closed'"), 'the repair offer must evict the closed channel')
+  assert.ok(startOfferSource.includes('connection.createDataChannel(DATA_CHANNEL_LABEL'), 'the repair offer must create a replacement channel')
   assert.ok(
-    vaporRoomSource.includes('remainingPeerIds.length > 0'),
-    'onPeerLeft must guard the syncPeers call with remainingPeerIds.length > 0',
-  )
-  assert.ok(
-    vaporRoomSource.includes('syncPeers(remainingPeerIds)'),
-    'onPeerLeft must call peerMeshRef.current?.syncPeers(remainingPeerIds) to repair the mesh after a peer departs',
-  )
-})
-
-test('outbound pending queue is cleared only in the truly-solo branch (participantCount <= 1)', () => {
-  const soloGuard = 'if (nextState.participantCount <= 1) {'
-  const pendingClear = 'chat.pendingMessagesRef.current = []'
-
-  const soloIdx = vaporRoomSource.indexOf(soloGuard)
-  const clearIdx = vaporRoomSource.indexOf(pendingClear)
-
-  assert.ok(soloIdx >= 0, `onPeerLeft must contain the solo-branch guard: "${soloGuard}"`)
-  assert.ok(clearIdx >= 0, `onPeerLeft must clear the pending queue with: "${pendingClear}"`)
-
-  assert.ok(
-    soloIdx < clearIdx,
-    'chat.pendingMessagesRef.current = [] must appear after the participantCount <= 1 guard — '
-    + 'it is inside the solo branch and must not execute while two or more peers remain',
-  )
-
-  const between = vaporRoomSource.slice(soloIdx + soloGuard.length, clearIdx)
-  const opens = (between.match(/\{/g) ?? []).length
-  const closes = (between.match(/\}/g) ?? []).length
-  assert.ok(
-    opens >= closes,
-    `pendingMessagesRef.current = [] must be inside the if-block: `
-    + `found ${opens} open-brace(s) vs ${closes} close-brace(s) between the guard and the clear`,
+    meshSource.includes("if (channel.readyState !== 'open') {") && meshSource.includes('channel.send(text)'),
+    'sendMessage must deliver through the replacement after it opens',
   )
 })

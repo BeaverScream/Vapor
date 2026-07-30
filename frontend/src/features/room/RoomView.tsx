@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Input } from '../../components/ui/input'
 import { cn } from '../../lib/utils'
 import { getSoloWaitingText, getLifetimeText } from './useVaporRoom'
+import { getParticipantCountText } from './participant-utils'
+import { HostReconnectGraceBanner } from './HostReconnectGraceBanner'
 import type { ChatMessage, Participant } from './types'
 
 interface RoomViewProps {
@@ -12,12 +14,14 @@ interface RoomViewProps {
   participantId: string | null
   hostId: string
   participantCount: number
+  reconnectingCount: number
   participants: Participant[]
   participantNicknames: Record<string, string>
   roomStatus: string
   chatStatusText: string
   soloDeadlineAt: number | null
   expiresAt: number | null
+  hostReconnectGraceDeadlineAt: number | null
   hasPassword: boolean
   copyFeedback: string | null
   chatMessages: ChatMessage[]
@@ -131,11 +135,17 @@ const CrownIcon = () => (
 
 interface ParticipantToggleRowProps {
   participantCount: number
+  reconnectingCount: number
   isOpen: boolean
   onToggle: () => void
 }
 
-const ParticipantToggleRow = memo(function ParticipantToggleRow({ participantCount, isOpen, onToggle }: ParticipantToggleRowProps) {
+const ParticipantToggleRow = memo(function ParticipantToggleRow({
+  participantCount,
+  reconnectingCount,
+  isOpen,
+  onToggle,
+}: ParticipantToggleRowProps) {
   return (
     <button
       type="button"
@@ -145,7 +155,7 @@ const ParticipantToggleRow = memo(function ParticipantToggleRow({ participantCou
       className="flex w-full cursor-pointer items-center justify-between rounded-xl border border-border bg-secondary/40 px-3 py-2.5 transition-colors hover:bg-secondary/70 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
     >
       <span className="text-xs font-semibold text-muted-foreground">
-        {participantCount} {participantCount === 1 ? 'participant' : 'participants'}
+        {getParticipantCountText(participantCount, reconnectingCount)}
       </span>
       <ChevronIcon className={cn('transition-transform duration-200', isOpen && 'rotate-180')} />
     </button>
@@ -484,12 +494,14 @@ export const RoomView = memo(function RoomView({
   participantId,
   hostId,
   participantCount,
+  reconnectingCount,
   participants,
   participantNicknames,
   roomStatus,
   chatStatusText,
   soloDeadlineAt,
   expiresAt,
+  hostReconnectGraceDeadlineAt,
   hasPassword,
   copyFeedback,
   chatMessages,
@@ -612,6 +624,7 @@ export const RoomView = memo(function RoomView({
             Copy ID
           </Button>
         </div>
+        <HostReconnectGraceBanner deadlineAt={hostReconnectGraceDeadlineAt} />
       </CardHeader>
 
       <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
@@ -624,6 +637,7 @@ export const RoomView = memo(function RoomView({
 
           <ParticipantToggleRow
             participantCount={participantCount}
+            reconnectingCount={reconnectingCount}
             isOpen={isParticipantListOpen}
             onToggle={() => setIsParticipantListOpen((previous) => !previous)}
           />

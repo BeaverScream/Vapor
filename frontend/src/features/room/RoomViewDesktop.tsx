@@ -3,6 +3,8 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { cn } from '../../lib/utils'
 import { getSoloWaitingText, getLifetimeText } from './useVaporRoom'
+import { getParticipantCountText } from './participant-utils'
+import { HostReconnectGraceBanner } from './HostReconnectGraceBanner'
 import type { ChatMessage, Participant } from './types'
 
 interface RoomViewDesktopProps {
@@ -11,12 +13,14 @@ interface RoomViewDesktopProps {
   participantId: string | null
   hostId: string
   participantCount: number
+  reconnectingCount: number
   participants: Participant[]
   participantNicknames: Record<string, string>
   roomStatus: string
   chatStatusText: string
   soloDeadlineAt: number | null
   expiresAt: number | null
+  hostReconnectGraceDeadlineAt: number | null
   hasPassword: boolean
   copyFeedback: string | null
   chatMessages: ChatMessage[]
@@ -329,12 +333,14 @@ export const RoomViewDesktop = memo(function RoomViewDesktop({
   participantId,
   hostId,
   participantCount,
+  reconnectingCount,
   participants,
   participantNicknames,
   roomStatus,
   chatStatusText,
   soloDeadlineAt,
   expiresAt,
+  hostReconnectGraceDeadlineAt,
   hasPassword,
   copyFeedback,
   chatMessages,
@@ -464,6 +470,7 @@ export const RoomViewDesktop = memo(function RoomViewDesktop({
             <span className="text-xs text-muted-foreground" aria-live="polite">{copyFeedback}</span>
           )}
         </div>
+        <HostReconnectGraceBanner deadlineAt={hostReconnectGraceDeadlineAt} />
 
         {/* Body: chat + optional participant panel */}
         <div className="flex min-h-0 flex-1">
@@ -521,7 +528,7 @@ export const RoomViewDesktop = memo(function RoomViewDesktop({
             >
               <div className="border-b border-border px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                  {participantCount} {participantCount === 1 ? 'Participant' : 'Participants'}
+                  {getParticipantCountText(participantCount, reconnectingCount)}
                 </p>
               </div>
               <ul className="vapor-scroll flex-1 overflow-y-auto">

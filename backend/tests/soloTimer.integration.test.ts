@@ -373,13 +373,14 @@ test("participant reconnects before solo timer fires → room_joined emitted →
   reconnectSocket.trigger(CLIENT_EVENTS.resumeSession, {
     roomId: roomCreated.roomId,
     reconnectToken: roomCreated.reconnectToken,
+    supportsSessionResumed: true,
   });
 
-  const resumed = reconnectSocket.popEvent(SERVER_EVENTS.roomJoined) as
+  const resumed = reconnectSocket.popEvent(SERVER_EVENTS.sessionResumed) as
     | { roomId: string; participantId: string }
     | undefined;
 
-  assert.ok(resumed, "room_joined received — reconnect succeeded before solo timer fired");
+  assert.ok(resumed, "session_resumed received — reconnect succeeded before solo timer fired");
   assert.equal(resumed?.roomId, roomCreated.roomId, "reconnected to the same room");
   assert.equal(getSnapshot().roomCount, 1, "room still alive after successful reconnect");
   assert.equal(popError(reconnectSocket), undefined, "no error on successful reconnect");
@@ -412,9 +413,10 @@ test("reconnect with solo host resets the timer", (t) => {
   reconnectSocket.trigger(CLIENT_EVENTS.resumeSession, {
     roomId: roomCreated.roomId,
     reconnectToken: roomCreated.reconnectToken,
+    supportsSessionResumed: true,
   });
 
-  const resumed = reconnectSocket.popEvent(SERVER_EVENTS.roomJoined);
+  const resumed = reconnectSocket.popEvent(SERVER_EVENTS.sessionResumed);
   assert.ok(resumed, "host reconnect succeeds");
   assert.equal(getSnapshot().roomCount, 1, "room alive after reconnect");
 
@@ -460,9 +462,10 @@ test("guest resuming as the sole live participant restarts the solo timer and re
   reconnectSocket.trigger(CLIENT_EVENTS.resumeSession, {
     roomId: roomCreated.roomId,
     reconnectToken: guestJoined.reconnectToken,
+    supportsSessionResumed: true,
   });
 
-  const resumed = reconnectSocket.popEvent(SERVER_EVENTS.roomJoined) as
+  const resumed = reconnectSocket.popEvent(SERVER_EVENTS.sessionResumed) as
     | { participantId: string; soloDeadlineAt?: number | null }
     | undefined;
 
@@ -564,13 +567,14 @@ test("T-CR14-02: host resumes within idle window after guest voluntarily leaves;
   hostReconnect.trigger(CLIENT_EVENTS.resumeSession, {
     roomId: roomCreated.roomId,
     reconnectToken: roomCreated.reconnectToken,
+    supportsSessionResumed: true,
   });
 
-  const resumed = hostReconnect.popEvent(SERVER_EVENTS.roomJoined) as
+  const resumed = hostReconnect.popEvent(SERVER_EVENTS.sessionResumed) as
     | { participantId: string; soloDeadlineAt?: number | null }
     | undefined;
 
-  assert.ok(resumed, "host receives room_joined after successful resume within idle window");
+  assert.ok(resumed, "host receives session_resumed after successful resume within idle window");
   assert.equal(popError(hostReconnect), undefined, "no error on host resume");
   assert.equal(getSnapshot().roomCount, 1, "room still alive after host resumes within idle window");
 });

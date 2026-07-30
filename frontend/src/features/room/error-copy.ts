@@ -33,7 +33,7 @@ export function getErrorMessage(code: ErrorCode): string {
     case SIGNALING_ERROR_CODES.ROOM_NOT_FOUND:
       return 'Room not found.'
     case SIGNALING_ERROR_CODES.ROOM_FULL:
-      return 'Room is full (5 max).'
+      return 'Room is at capacity — some slots are held for reconnecting participants.'
     case SIGNALING_ERROR_CODES.ROOM_EXPIRED:
       return 'Room expired.'
     case SIGNALING_ERROR_CODES.INVALID_PASSWORD:

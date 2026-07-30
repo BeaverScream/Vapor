@@ -753,19 +753,20 @@ test("T1.6-03: host resume_session before grace deadline restores host without r
   const resumedHost = io.connect("socket-host-resumed");
   resumedHost.trigger(CLIENT_EVENTS.resumeSession, {
     roomId: roomCreated.roomId,
-    reconnectToken: roomCreated.reconnectToken
+    reconnectToken: roomCreated.reconnectToken,
+    supportsSessionResumed: true
   });
 
   await flushPromises();
 
-  const resumedRoomJoined = resumedHost.popEvent(SERVER_EVENTS.roomJoined) as {
+  const resumedRoomJoined = resumedHost.popEvent(SERVER_EVENTS.sessionResumed) as {
     roomId: string;
     participantId: string;
     hostId: string;
     participantCount: number;
   };
 
-  assert.ok(resumedRoomJoined, "Expected resumed host to receive room_joined");
+  assert.ok(resumedRoomJoined, "Expected resumed host to receive session_resumed");
   assert.equal(resumedRoomJoined.roomId, roomCreated.roomId);
   assert.equal(resumedRoomJoined.participantId, roomCreated.participantId);
   assert.equal(resumedRoomJoined.hostId, roomCreated.hostId);
@@ -777,6 +778,121 @@ test("T1.6-03: host resume_session before grace deadline restores host without r
   const snapshot = hooks.getStateSnapshot();
   assert.equal(snapshot.roomCount, 1);
   assert.equal(snapshot.rooms[0]?.participantCount, 2);
+});
+
+// ---- VP-12.5 peers[].isHost payload contract ----
+
+test("T12.5-01: join payload marks exactly the host peer with isHost", () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest1 = io.connect("socket-guest-1");
+  const guest2 = io.connect("socket-guest-2");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string; participantId: string };
+
+  guest1.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest 1" });
+  const guest1Joined = guest1.popEvent(SERVER_EVENTS.roomJoined) as { participantId: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  guest2.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest 2" });
+  const guest2Joined = guest2.popEvent(SERVER_EVENTS.roomJoined) as {
+    hostId: string;
+    peers: Array<{ participantId: string; nickname: string | null; isHost: boolean }>;
+  };
+
+  assert.ok(guest2Joined, "joining guest must receive room_joined");
+  assert.equal(guest2Joined.peers.length, 2, "join payload includes the host and existing guest only");
+  assert.deepEqual(
+    guest2Joined.peers.map((peer) => peer.participantId),
+    [roomCreated.participantId, guest1Joined.participantId],
+    "peer ordering remains unchanged",
+  );
+  assert.equal(
+    guest2Joined.peers.filter((peer) => peer.isHost).length,
+    1,
+    "exactly one listed peer is marked as host",
+  );
+  assert.equal(
+    guest2Joined.peers.find((peer) => peer.isHost)?.participantId,
+    guest2Joined.hostId,
+    "the host flag agrees with room_joined.hostId",
+  );
+  assert.ok(guest2Joined.peers.every((peer) => peer.nickname !== undefined), "peer nicknames are never undefined");
+});
+
+test("T12.5-02: join payload filters a host grace sentinel before assigning isHost", () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest1 = io.connect("socket-guest-1");
+  const guest2 = io.connect("socket-guest-2");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string; participantId: string };
+  guest1.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest 1" });
+  const guest1Joined = guest1.popEvent(SERVER_EVENTS.roomJoined) as { participantId: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+
+  host.triggerDisconnect();
+  guest1.popEvent(SERVER_EVENTS.peerLeft);
+  guest1.popEvent(SERVER_EVENTS.hostReconnectGrace);
+
+  guest2.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest 2" });
+  const guest2Joined = guest2.popEvent(SERVER_EVENTS.roomJoined) as {
+    peers: Array<{ participantId: string; isHost: boolean }>;
+  };
+
+  assert.ok(guest2Joined, "joining guest must receive room_joined while host grace is active");
+  assert.deepEqual(
+    guest2Joined.peers.map((peer) => peer.participantId),
+    [guest1Joined.participantId],
+    "the disconnected host sentinel is excluded from peers",
+  );
+  assert.equal(guest2Joined.peers.some((peer) => peer.isHost), false, "no host flag is emitted for a filtered sentinel");
+});
+
+test("T12.5-03: session_resumed peers carry host flags and concrete nicknames", async () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("socket-host");
+  const guest1 = io.connect("socket-guest-1");
+  const guest2 = io.connect("socket-guest-2");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string; participantId: string };
+  guest1.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest 1" });
+  const guest1Joined = guest1.popEvent(SERVER_EVENTS.roomJoined) as { participantId: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+  guest2.trigger(CLIENT_EVENTS.joinRoom, { roomId: roomCreated.roomId, password: "pw", nickname: "Guest 2" });
+  const guest2Joined = guest2.popEvent(SERVER_EVENTS.roomJoined) as { reconnectToken: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+  guest1.popEvent(SERVER_EVENTS.peerJoined);
+
+  guest2.triggerDisconnect();
+  host.popEvent(SERVER_EVENTS.peerLeft);
+  guest1.popEvent(SERVER_EVENTS.peerLeft);
+
+  const resumedGuest = io.connect("socket-guest-2-resumed");
+  resumedGuest.trigger(CLIENT_EVENTS.resumeSession, {
+    roomId: roomCreated.roomId,
+    reconnectToken: guest2Joined.reconnectToken,
+    supportsSessionResumed: true,
+  });
+  await flushPromises();
+
+  const resumed = resumedGuest.popEvent(SERVER_EVENTS.sessionResumed) as {
+    peers: Array<{ participantId: string; nickname: string | null; isHost: boolean }>;
+  };
+
+  assert.ok(resumed, "resuming guest must receive session_resumed");
+  assert.deepEqual(
+    resumed.peers.map((peer) => ({ participantId: peer.participantId, isHost: peer.isHost })),
+    [
+      { participantId: roomCreated.participantId, isHost: true },
+      { participantId: guest1Joined.participantId, isHost: false },
+    ],
+    "resume peers retain ordering and correctly identify the live host",
+  );
+  assert.ok(resumed.peers.every((peer) => peer.nickname !== undefined), "resume peer nicknames are never undefined");
 });
 
 test("T1.6-04 (P3-SH-008): host grace timer expiry destroys room with host_grace_expired reason", () => {
@@ -1123,12 +1239,13 @@ test("VP-2.2-01: resume token race conditions are deterministic with single winn
   // Both race simultaneously (same time)
   hostResumed1.trigger(CLIENT_EVENTS.resumeSession, {
     roomId: roomCreated.roomId,
-    reconnectToken: roomCreated.reconnectToken
+    reconnectToken: roomCreated.reconnectToken,
+    supportsSessionResumed: true
   });
 
   await flushPromises();
 
-  const resumed1 = hostResumed1.popEvent(SERVER_EVENTS.roomJoined);
+  const resumed1 = hostResumed1.popEvent(SERVER_EVENTS.sessionResumed);
   assert.ok(resumed1, "First resume should succeed");
 
   // Second resume with same token should fail (token already consumed)
@@ -1141,7 +1258,7 @@ test("VP-2.2-01: resume token race conditions are deterministic with single winn
 
   const resumed2Error = popSocketError(hostResumed2);
   assert.ok(resumed2Error, "Second resume race should fail");
-  assert.equal(resumed2Error.code, "ROOM_NOT_FOUND", "Second resume must be rejected as deterministic losing path");
+  assert.equal(resumed2Error.code, "RECONNECT_TOKEN_STALE", "Second resume must be rejected as deterministic losing path");
 
   const snapshot = hooks.getStateSnapshot();
   assert.equal(snapshot.roomCount, 1);
@@ -1182,12 +1299,13 @@ test("VP-2.2-02: rapid disconnect and reconnect churn recovers without ghost sta
     const guestResumed = io.connect(`socket-guest-resumed-${cycle}`);
     guestResumed.trigger(CLIENT_EVENTS.resumeSession, {
       roomId: roomCreated.roomId,
-      reconnectToken: currentGuestToken
+      reconnectToken: currentGuestToken,
+      supportsSessionResumed: true
     });
 
     await flushPromises();
 
-    const roomJoined = guestResumed.popEvent(SERVER_EVENTS.roomJoined) as {
+    const roomJoined = guestResumed.popEvent(SERVER_EVENTS.sessionResumed) as {
       participantCount?: number;
       reconnectToken: string;
     };
@@ -1337,8 +1455,8 @@ test("T3.1-04 (P3-SH-004): room destruction atomically purges timers, indexes, a
   assert.equal(snapshot.participantToRoomCount, 0, "participantToRoom index must be fully cleared");
   assert.equal(snapshot.socketToParticipantCount, 0, "socketToParticipant index must be fully cleared");
 
-  // Reconnect record for the disconnected guest must have been purged atomically —
-  // resume must fail with ROOM_NOT_FOUND rather than finding a stale record.
+  // Reconnect record for the disconnected guest must have been purged atomically.
+  // A token whose hash no longer has a record is RECONNECT_TOKEN_STALE.
   const guestResumed = io.connect("socket-guest-after-destroy");
   guestResumed.trigger(CLIENT_EVENTS.resumeSession, {
     roomId: roomCreated.roomId,
@@ -1353,10 +1471,10 @@ test("T3.1-04 (P3-SH-004): room destruction atomically purges timers, indexes, a
   );
   const resumeError = popSocketError(guestResumed);
   assert.ok(resumeError, "Error must be emitted when resuming into a destroyed room");
-  assert.equal(resumeError.code, "ROOM_NOT_FOUND", "Destroyed room must return ROOM_NOT_FOUND on resume attempt");
+  assert.equal(resumeError.code, "RECONNECT_TOKEN_STALE", "Purged reconnect token must be stale");
 });
 
-test("T3.1-06 (P3-SH-006): resume_session returns ROOM_NOT_FOUND when grace deadline has elapsed", async () => {
+test("T3.1-06 (P3-SH-006): resume_session returns HOST_RECONNECT_WINDOW_EXPIRED when host grace deadline has elapsed", async () => {
   const originalSetTimeout = globalThis.setTimeout;
   const originalClearTimeout = globalThis.clearTimeout;
 
@@ -1416,7 +1534,11 @@ test("T3.1-06 (P3-SH-006): resume_session returns ROOM_NOT_FOUND when grace dead
 
     const resumeError = popSocketError(hostLate);
     assert.ok(resumeError, "Error must be emitted when resuming after grace deadline");
-    assert.equal(resumeError.code, "ROOM_NOT_FOUND", "Elapsed grace window must return ROOM_NOT_FOUND");
+    assert.equal(
+      resumeError.code,
+      "HOST_RECONNECT_WINDOW_EXPIRED",
+      "Elapsed host grace window must return HOST_RECONNECT_WINDOW_EXPIRED",
+    );
   } finally {
     globalThis.setTimeout = originalSetTimeout;
     globalThis.clearTimeout = originalClearTimeout;
@@ -1524,7 +1646,7 @@ test("T3.1-07 (P3-SH-007): solo-host timer handle is cleared when first guest jo
   }
 });
 
-test("T3.1-08 (P3-SH-008): host grace timer fires and destroys room with host_grace_expired; post-expiry resume returns ROOM_NOT_FOUND", async () => {
+test("T3.1-08 (P3-SH-008): host grace timer destroys the room and purges the reconnect token", async () => {
   const originalSetTimeout = globalThis.setTimeout;
   const originalClearTimeout = globalThis.clearTimeout;
 
@@ -1593,7 +1715,8 @@ test("T3.1-08 (P3-SH-008): host grace timer fires and destroys room with host_gr
     assert.equal(snapshotAfterGrace.participantToRoomCount, 0, "participantToRoom index must be fully cleared");
     assert.equal(snapshotAfterGrace.socketToParticipantCount, 0, "socketToParticipant index must be fully cleared");
 
-    // Post-expiry resume attempt must return ROOM_NOT_FOUND — reconnect record is purged with the room
+    // The room cleanup purges the reconnect record. The late token is therefore
+    // unknown/stale rather than a valid token pointing at a missing room.
     const hostLate = io.connect("socket-host-late");
     hostLate.trigger(CLIENT_EVENTS.resumeSession, {
       roomId: roomCreated.roomId,
@@ -1609,7 +1732,7 @@ test("T3.1-08 (P3-SH-008): host grace timer fires and destroys room with host_gr
 
     const lateResumeError = popSocketError(hostLate);
     assert.ok(lateResumeError, "Error must be emitted for post-grace resume attempt");
-    assert.equal(lateResumeError.code, "ROOM_NOT_FOUND", "Purged reconnect record must yield ROOM_NOT_FOUND on late resume");
+    assert.equal(lateResumeError.code, "RECONNECT_TOKEN_STALE", "Purged reconnect record must yield a stale-token error");
   } finally {
     globalThis.setTimeout = originalSetTimeout;
     globalThis.clearTimeout = originalClearTimeout;
@@ -1761,10 +1884,11 @@ test("T11.4-04 (CR11-13): a nickname reserved by a grace-held host sentinel cann
   hostResumed.trigger(CLIENT_EVENTS.resumeSession, {
     roomId: roomCreated.roomId,
     reconnectToken: roomCreated.reconnectToken,
+    supportsSessionResumed: true,
   });
   await flushPromises();
 
-  const resumed = hostResumed.popEvent(SERVER_EVENTS.roomJoined) as { participantNickname?: string } | undefined;
+  const resumed = hostResumed.popEvent(SERVER_EVENTS.sessionResumed) as { participantNickname?: string } | undefined;
   assert.ok(resumed, "Host must be able to resume its own room after a rejected collision join");
   assert.equal(popSocketError(hostResumed), undefined, "Host resume must not error after the reserved nickname was defended");
   assert.equal(resumed.participantNickname, "Alice", "Host must reclaim its reserved nickname on resume");
@@ -1963,7 +2087,7 @@ test("P3-LC-002 (P3-SH-007): solo-host timer handle is cleared when first guest 
 
 // ---- T3.1 Security & Housekeeping (additions) ----
 
-test("T3.1-09 (P3-SH-009): resume_session returns ROOM_NOT_FOUND when participant token is valid but participant has not disconnected", async () => {
+test("T12.3-02: resume_session returns RECONNECT_TOKEN_STALE when participant token is valid but participant has not disconnected", async () => {
   const { io } = setupSocketHarness();
   const host = io.connect("socket-host");
 
@@ -1984,13 +2108,13 @@ test("T3.1-09 (P3-SH-009): resume_session returns ROOM_NOT_FOUND when participan
   await flushPromises();
 
   assert.equal(
-    intruder.popEvent(SERVER_EVENTS.roomJoined),
+    intruder.popEvent(SERVER_EVENTS.sessionResumed),
     undefined,
     "Resume must be rejected when participant has not disconnected"
   );
   const resumeError = popSocketError(intruder);
   assert.ok(resumeError, "Error must be emitted for a non-disconnected token");
-  assert.equal(resumeError.code, "ROOM_NOT_FOUND", "Active-session resume attempt must return ROOM_NOT_FOUND");
+  assert.equal(resumeError.code, "RECONNECT_TOKEN_STALE", "Active-session resume attempt must return RECONNECT_TOKEN_STALE");
 });
 
 test("T3.1-10 (P3-SH-010): room_password_update by a non-host guest returns ROOM_NOT_FOUND and leaves password unchanged", async () => {
@@ -2252,6 +2376,32 @@ test("T3.2-09 (P3-NK-009): nicknames with disallowed characters are rejected wit
   assert.equal(snapshot.rooms[0]?.participantCount, 1, "Room must still have only the host after all rejected joins");
 });
 
+test("T3.2-10: nicknames accept dots and normalize repeated spaces", () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("socket-host-dot");
+  const guest = io.connect("socket-guest-spaces");
+
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Alice.Smith" });
+  const roomCreated = host.popEvent(SERVER_EVENTS.roomCreated) as {
+    roomId: string;
+    participantNickname: string;
+  };
+  assert.ok(roomCreated, "A nickname containing a dot must be accepted");
+  assert.equal(roomCreated.participantNickname, "Alice.Smith");
+
+  guest.trigger(CLIENT_EVENTS.joinRoom, {
+    roomId: roomCreated.roomId,
+    password: "pw",
+    nickname: "  Bob   Jones  ",
+  });
+  const roomJoined = guest.popEvent(SERVER_EVENTS.roomJoined) as {
+    participantNickname: string;
+  };
+  assert.ok(roomJoined, "A nickname containing normalized internal spaces must be accepted");
+  assert.equal(roomJoined.participantNickname, "Bob Jones");
+  assert.equal(popSocketError(guest), undefined);
+});
+
 // ---- T4.1 Identity & UX Refinement ----
 
 test("T4.1-01: room_joined peers list includes nickname for every peer with values matching join/create submissions", () => {
@@ -2387,17 +2537,18 @@ test("T4.1-05: resume_session response includes participantNickname for the resu
   resumedHost.trigger(CLIENT_EVENTS.resumeSession, {
     roomId: roomCreated.roomId,
     reconnectToken: roomCreated.reconnectToken,
+    supportsSessionResumed: true,
   });
   await flushPromises();
 
-  const resumeRoomJoined = resumedHost.popEvent(SERVER_EVENTS.roomJoined) as {
+  const resumeRoomJoined = resumedHost.popEvent(SERVER_EVENTS.sessionResumed) as {
     roomId: string;
     participantId: string;
     participantNickname?: string | null;
     peers: Array<{ participantId: string; nickname?: string | null }>;
   };
 
-  assert.ok(resumeRoomJoined, "Resumed host must receive room_joined");
+  assert.ok(resumeRoomJoined, "Resumed host must receive session_resumed");
   assert.equal(
     resumeRoomJoined.participantNickname,
     "Alice",
@@ -2523,10 +2674,11 @@ test("T4.3-04: resume_session response includes the correct hasPassword value re
   resumedHostOpen.trigger(CLIENT_EVENTS.resumeSession, {
     roomId: openCreated.roomId,
     reconnectToken: openCreated.reconnectToken,
+    supportsSessionResumed: true,
   });
   await flushPromises();
 
-  const openResumeJoined = resumedHostOpen.popEvent(SERVER_EVENTS.roomJoined) as {
+  const openResumeJoined = resumedHostOpen.popEvent(SERVER_EVENTS.sessionResumed) as {
     hasPassword?: boolean;
   };
   assert.ok(openResumeJoined, "Resumed host must receive room_joined for open room");
@@ -2555,10 +2707,11 @@ test("T4.3-04: resume_session response includes the correct hasPassword value re
   resumedHostProt.trigger(CLIENT_EVENTS.resumeSession, {
     roomId: protCreated.roomId,
     reconnectToken: protCreated.reconnectToken,
+    supportsSessionResumed: true,
   });
   await flushPromises();
 
-  const protResumeJoined = resumedHostProt.popEvent(SERVER_EVENTS.roomJoined) as {
+  const protResumeJoined = resumedHostProt.popEvent(SERVER_EVENTS.sessionResumed) as {
     hasPassword?: boolean;
   };
   assert.ok(protResumeJoined, "Resumed host must receive room_joined for password-protected room");
@@ -2773,7 +2926,7 @@ test("T4.4-04: resume_session with the kicked participant's reconnect token retu
   );
   const resumeError = popSocketError(kickedResumed);
   assert.ok(resumeError, "Error must be emitted for a kicked participant's resume attempt");
-  assert.equal(resumeError.code, "ROOM_NOT_FOUND", "Kicked participant's reconnect token must be purged, returning ROOM_NOT_FOUND on resume");
+  assert.equal(resumeError.code, "RECONNECT_TOKEN_STALE", "A purged reconnect token must return RECONNECT_TOKEN_STALE on resume");
 });
 
 test("T4.4-05: room participant count decreases by one after a successful kick; no room_destroyed emitted to remaining participants", () => {
@@ -2980,7 +3133,7 @@ test("T4.4-10: kicking a guest in the grace window removes their entry from stat
   );
   const resumeError = popSocketError(kickedResumed);
   assert.ok(resumeError, "Error must be emitted when kicked grace-window participant attempts to resume");
-  assert.equal(resumeError.code, "ROOM_NOT_FOUND", "Kicked grace-window participant's reconnect token must be purged");
+  assert.equal(resumeError.code, "RECONNECT_TOKEN_STALE", "A kicked grace-window participant's purged token must be stale");
 });
 
 // ---- T6.1 Metrics counter wiring (signaling hooks) ----
@@ -3137,4 +3290,304 @@ test("T11.7-04: lastSeenAt refreshes on signal relay activity (offer/ice)", () =
 
   const recordAfterIce = hooks.getParticipantRecord(roomCreated.roomId, guestJoined.participantId);
   assert.equal(recordAfterIce?.lastSeenAt, 8000, "lastSeenAt must refresh to now() after a successful signal_ice relay");
+});
+
+// ---- VP-12.3 Resume session event and granular failures ----
+
+test("T12.3-01: unknown and wrong-room reconnect tokens are stale and counted", async () => {
+  const { io, realMetrics } = setupSocketHarnessWithMetrics();
+  const host = io.connect("vp123-host");
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const created = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string; reconnectToken: string };
+  for (const [roomId, reconnectToken] of [[created.roomId, "never-issued"], ["Other99", created.reconnectToken]] as const) {
+    const resumer = io.connect(`vp123-${roomId}`);
+    resumer.trigger(CLIENT_EVENTS.resumeSession, { roomId, reconnectToken });
+    await flushPromises();
+    assert.equal(resumer.popEvent(SERVER_EVENTS.sessionResumed), undefined);
+    assert.equal(popSocketError(resumer)?.code, "RECONNECT_TOKEN_STALE");
+  }
+  assert.equal(realMetrics.collectMetricsSnapshot().errorCounts.RECONNECT_TOKEN_STALE, 2);
+});
+
+test("T12.3-03/04/05: expiry distinguishes host, guest, and a destroyed room and records host expiry", async () => {
+  let timeNow = 10_000;
+  const { io, state, realMetrics } = setupSocketHarnessWithMetrics({ now: () => timeNow });
+  const host = io.connect("vp123-host");
+  const guest = io.connect("vp123-guest");
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const created = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string; reconnectToken: string };
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: created.roomId, password: "pw", nickname: "Guest" });
+  guest.popEvent(SERVER_EVENTS.roomJoined); host.popEvent(SERVER_EVENTS.peerJoined);
+  host.triggerDisconnect(); guest.popEvent(SERVER_EVENTS.peerLeft); guest.popEvent(SERVER_EVENTS.hostReconnectGrace);
+  timeNow += HOST_DISCONNECT_GRACE_MS + 1;
+  const lateHost = io.connect("vp123-late-host");
+  lateHost.trigger(CLIENT_EVENTS.resumeSession, { roomId: created.roomId, reconnectToken: created.reconnectToken });
+  await flushPromises();
+  assert.equal(popSocketError(lateHost)?.code, "HOST_RECONNECT_WINDOW_EXPIRED");
+  assert.equal(realMetrics.collectMetricsSnapshot().errorCounts.HOST_RECONNECT_WINDOW_EXPIRED, 1);
+  state.rooms.delete(created.roomId);
+  const deadRoomHost = io.connect("vp123-dead-room-host");
+  deadRoomHost.trigger(CLIENT_EVENTS.resumeSession, { roomId: created.roomId, reconnectToken: created.reconnectToken });
+  await flushPromises();
+  assert.equal(popSocketError(deadRoomHost)?.code, "ROOM_NOT_FOUND");
+
+  const { io: guestIo } = setupSocketHarness({ now: () => timeNow });
+  const host2 = guestIo.connect("vp123-guest-host"); const guest2 = guestIo.connect("vp123-guest");
+  host2.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host-2" });
+  const room2 = host2.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  guest2.trigger(CLIENT_EVENTS.joinRoom, { roomId: room2.roomId, password: "pw", nickname: "Guest-2" });
+  const guest2Joined = guest2.popEvent(SERVER_EVENTS.roomJoined) as { reconnectToken: string };
+  host2.popEvent(SERVER_EVENTS.peerJoined); guest2.triggerDisconnect(); host2.popEvent(SERVER_EVENTS.peerLeft);
+  timeNow += GUEST_DISCONNECT_GRACE_MS + 1;
+  const lateGuest = guestIo.connect("vp123-late-guest");
+  lateGuest.trigger(CLIENT_EVENTS.resumeSession, { roomId: room2.roomId, reconnectToken: guest2Joined.reconnectToken });
+  await flushPromises();
+  assert.equal(popSocketError(lateGuest)?.code, "RECONNECT_TOKEN_STALE");
+});
+
+test("T12.3-06/07/08/09: capable resume returns one complete session_resumed payload and one peer announcement", async () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("vp123-payload-host"); const guest = io.connect("vp123-payload-guest");
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host", roomName: "payload-room" });
+  const created = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string; participantId: string };
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: created.roomId, password: "pw", nickname: "Guest" });
+  const joined = guest.popEvent(SERVER_EVENTS.roomJoined) as { participantId: string; reconnectToken: string };
+  host.popEvent(SERVER_EVENTS.peerJoined); guest.triggerDisconnect(); host.popEvent(SERVER_EVENTS.peerLeft);
+  const resumed = io.connect("vp123-resumed");
+  resumed.trigger(CLIENT_EVENTS.resumeSession, { roomId: created.roomId, reconnectToken: joined.reconnectToken, supportsSessionResumed: true });
+  await flushPromises();
+  const payload = resumed.popEvent(SERVER_EVENTS.sessionResumed) as {
+    roomId: string;
+    participantId: string;
+    hostId: string;
+    reconnectToken: string;
+    participantNickname: string | null;
+    peers: Array<{ participantId: string; nickname: string | null; isHost: boolean }>;
+    expiresAt: number;
+    soloDeadlineAt?: number | null;
+    participantCount: number;
+    reconnectingCount: number;
+    hasPassword: boolean;
+    roomName?: string;
+    hostReconnectGraceDeadlineAt?: number;
+  };
+  assert.ok(payload); assert.equal(resumed.popEvent(SERVER_EVENTS.roomJoined), undefined);
+  assert.equal(payload.roomId, created.roomId);
+  assert.equal(payload.participantId, joined.participantId);
+  assert.equal(payload.hostId, created.participantId);
+  assert.equal(payload.participantNickname, "Guest");
+  assert.notEqual(payload.reconnectToken, joined.reconnectToken);
+  assert.equal(typeof payload.expiresAt, "number");
+  assert.equal(payload.soloDeadlineAt, undefined);
+  assert.equal(payload.participantCount, 2);
+  assert.equal(payload.reconnectingCount, 0);
+  assert.equal(payload.hasPassword, true);
+  assert.equal(payload.roomName, "payload-room");
+  assert.equal(payload.hostReconnectGraceDeadlineAt, undefined);
+  assert.deepEqual(payload.peers, [{
+    participantId: created.participantId,
+    nickname: "Host",
+    isHost: true,
+  }]);
+  assert.equal(host.popEvent(SERVER_EVENTS.sessionResumed), undefined);
+  assert.deepEqual(host.popEvent(SERVER_EVENTS.peerJoined), { participantId: joined.participantId, nickname: "Guest", participantCount: 2, reconnectingCount: 0 });
+  assert.equal(host.popEvent(SERVER_EVENTS.peerJoined), undefined, "resume must broadcast peer_joined exactly once");
+  const stale = io.connect("vp123-old-token"); stale.trigger(CLIENT_EVENTS.resumeSession, { roomId: created.roomId, reconnectToken: joined.reconnectToken });
+  await flushPromises(); assert.equal(popSocketError(stale)?.code, "RECONNECT_TOKEN_STALE");
+  resumed.triggerDisconnect(); host.popEvent(SERVER_EVENTS.peerLeft);
+  host.trigger(CLIENT_EVENTS.roomPasswordUpdate, { roomId: created.roomId, newPassword: "rotated" }); await flushPromises();
+  const mismatch = io.connect("vp123-mismatch"); mismatch.trigger(CLIENT_EVENTS.resumeSession, { roomId: created.roomId, reconnectToken: payload.reconnectToken });
+  await flushPromises(); assert.equal(popSocketError(mismatch)?.code, "INVALID_PASSWORD");
+  const malformed = io.connect("vp123-malformed"); malformed.trigger(CLIENT_EVENTS.resumeSession, { roomId: created.roomId, reconnectToken: "" });
+  await flushPromises(); assert.equal(popSocketError(malformed)?.code, "ROOM_NOT_FOUND");
+});
+
+test("T12.3-16: a valid reconnect record with a missing roster participant is stale", async () => {
+  const { io, state } = setupSocketHarness();
+  const host = io.connect("vp123-missing-host");
+  const guest = io.connect("vp123-missing-guest");
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const created = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: created.roomId, password: "pw", nickname: "Guest" });
+  const joined = guest.popEvent(SERVER_EVENTS.roomJoined) as { participantId: string; reconnectToken: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+  guest.triggerDisconnect();
+  host.popEvent(SERVER_EVENTS.peerLeft);
+  state.rooms.get(created.roomId)?.participants.delete(joined.participantId);
+
+  const resumed = io.connect("vp123-missing-resumer");
+  resumed.trigger(CLIENT_EVENTS.resumeSession, {
+    roomId: created.roomId,
+    reconnectToken: joined.reconnectToken,
+    supportsSessionResumed: true,
+  });
+  await flushPromises();
+
+  assert.equal(resumed.popEvent(SERVER_EVENTS.sessionResumed), undefined);
+  assert.equal(popSocketError(resumed)?.code, "RECONNECT_TOKEN_STALE");
+});
+
+test("T12.3-BC: resume response is capability-negotiated without duplicate events", async () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("vp123-compat-host");
+  const legacyGuest = io.connect("vp123-compat-guest");
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const created = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  legacyGuest.trigger(CLIENT_EVENTS.joinRoom, { roomId: created.roomId, password: "pw", nickname: "Guest" });
+  const joined = legacyGuest.popEvent(SERVER_EVENTS.roomJoined) as { reconnectToken: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+  legacyGuest.triggerDisconnect();
+  host.popEvent(SERVER_EVENTS.peerLeft);
+  host.triggerDisconnect();
+
+  const legacyResumer = io.connect("vp123-compat-resumer");
+  legacyResumer.trigger(CLIENT_EVENTS.resumeSession, {
+    roomId: created.roomId,
+    reconnectToken: joined.reconnectToken,
+  });
+  await flushPromises();
+
+  const legacyPayload = legacyResumer.popEvent(SERVER_EVENTS.roomJoined) as
+    | { hostReconnectGraceDeadlineAt?: number }
+    | undefined;
+  assert.ok(legacyPayload, "legacy client receives room_joined");
+  assert.equal(
+    Object.hasOwn(legacyPayload, "hostReconnectGraceDeadlineAt"),
+    false,
+    "legacy room_joined retains the legacy payload shape during host grace",
+  );
+  assert.equal(legacyResumer.popEvent(SERVER_EVENTS.sessionResumed), undefined);
+  assert.equal(legacyResumer.popEvent(SERVER_EVENTS.roomJoined), undefined, "response is emitted exactly once");
+});
+
+test("T12.3-08: host grace deadline is supplied only to a guest resuming during host grace", async () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("vp123-grace-host"); const guest = io.connect("vp123-grace-guest");
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const created = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string; reconnectToken: string };
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: created.roomId, password: "pw", nickname: "Guest" });
+  const joined = guest.popEvent(SERVER_EVENTS.roomJoined) as { reconnectToken: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+  host.triggerDisconnect(); guest.popEvent(SERVER_EVENTS.peerLeft);
+  const grace = guest.popEvent(SERVER_EVENTS.hostReconnectGrace) as { deadlineAt: number };
+  guest.triggerDisconnect();
+  const resumedGuest = io.connect("vp123-grace-guest-resumed");
+  resumedGuest.trigger(CLIENT_EVENTS.resumeSession, { roomId: created.roomId, reconnectToken: joined.reconnectToken, supportsSessionResumed: true });
+  await flushPromises();
+  const guestPayload = resumedGuest.popEvent(SERVER_EVENTS.sessionResumed) as { hostReconnectGraceDeadlineAt?: number };
+  assert.equal(guestPayload.hostReconnectGraceDeadlineAt, grace.deadlineAt);
+  const resumedHost = io.connect("vp123-grace-host-resumed");
+  resumedHost.trigger(CLIENT_EVENTS.resumeSession, { roomId: created.roomId, reconnectToken: created.reconnectToken, supportsSessionResumed: true });
+  await flushPromises();
+  const hostPayload = resumedHost.popEvent(SERVER_EVENTS.sessionResumed) as { hostReconnectGraceDeadlineAt?: number };
+  assert.equal(hostPayload.hostReconnectGraceDeadlineAt, undefined);
+});
+
+// ---- VP-12.4 Capacity display and ROOM_FULL copy ----
+
+test("T12.4-01/02: join payloads report reconnecting slots without changing live participant counts", () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("vp124-join-host");
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const created = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+
+  const guest1 = io.connect("vp124-join-guest-1");
+  guest1.trigger(CLIENT_EVENTS.joinRoom, { roomId: created.roomId, password: "pw", nickname: "Guest-1" });
+  const joined1 = guest1.popEvent(SERVER_EVENTS.roomJoined) as { participantCount: number; reconnectingCount?: number };
+  const peerJoined1 = host.popEvent(SERVER_EVENTS.peerJoined) as { reconnectingCount?: number };
+  assert.equal(joined1.participantCount, 2);
+  assert.equal(joined1.reconnectingCount, 0);
+  assert.equal(peerJoined1.reconnectingCount, 0);
+
+  guest1.triggerDisconnect();
+  host.popEvent(SERVER_EVENTS.peerLeft);
+
+  const guest2 = io.connect("vp124-join-guest-2");
+  guest2.trigger(CLIENT_EVENTS.joinRoom, { roomId: created.roomId, password: "pw", nickname: "Guest-2" });
+  const joined2 = guest2.popEvent(SERVER_EVENTS.roomJoined) as { participantCount: number; reconnectingCount?: number };
+  const peerJoined2 = host.popEvent(SERVER_EVENTS.peerJoined) as { participantCount: number; reconnectingCount?: number };
+  assert.equal(joined2.participantCount, 2, "participantCount remains the live count");
+  assert.equal(joined2.reconnectingCount, 1, "the grace-held slot is reported separately");
+  assert.equal(peerJoined2.participantCount, 2);
+  assert.equal(peerJoined2.reconnectingCount, 1);
+});
+
+test("T12.4-03: peer_left reports reconnecting slots for disconnect, leave, and kick", () => {
+  const disconnectHarness = setupSocketHarness();
+  const disconnectHost = disconnectHarness.io.connect("vp124-left-disconnect-host");
+  disconnectHost.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const disconnectRoom = disconnectHost.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  const disconnectingGuest = disconnectHarness.io.connect("vp124-left-disconnect");
+  disconnectingGuest.trigger(CLIENT_EVENTS.joinRoom, { roomId: disconnectRoom.roomId, password: "pw", nickname: "Disconnecting" });
+  disconnectingGuest.popEvent(SERVER_EVENTS.roomJoined); disconnectHost.popEvent(SERVER_EVENTS.peerJoined);
+  disconnectingGuest.triggerDisconnect();
+  assert.equal((disconnectHost.popEvent(SERVER_EVENTS.peerLeft) as { reconnectingCount?: number }).reconnectingCount, 1);
+
+  const leaveHarness = setupSocketHarness();
+  const leaveHost = leaveHarness.io.connect("vp124-left-leave-host");
+  leaveHost.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const leaveRoom = leaveHost.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  const leavingGuest = leaveHarness.io.connect("vp124-left-leave");
+  leavingGuest.trigger(CLIENT_EVENTS.joinRoom, { roomId: leaveRoom.roomId, password: "pw", nickname: "Leaving" });
+  leavingGuest.popEvent(SERVER_EVENTS.roomJoined); leaveHost.popEvent(SERVER_EVENTS.peerJoined);
+  leavingGuest.trigger(CLIENT_EVENTS.leaveRoom, {});
+  assert.equal((leaveHost.popEvent(SERVER_EVENTS.peerLeft) as { reconnectingCount?: number }).reconnectingCount, 0);
+
+  const kickHarness = setupSocketHarness();
+  const kickHost = kickHarness.io.connect("vp124-left-kick-host");
+  kickHost.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const kickRoom = kickHost.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  const kickedGuest = kickHarness.io.connect("vp124-left-kick");
+  kickedGuest.trigger(CLIENT_EVENTS.joinRoom, { roomId: kickRoom.roomId, password: "pw", nickname: "Kicked" });
+  const kickedJoined = kickedGuest.popEvent(SERVER_EVENTS.roomJoined) as { participantId: string };
+  kickHost.popEvent(SERVER_EVENTS.peerJoined);
+  kickHost.trigger(CLIENT_EVENTS.kickParticipant, { roomId: kickRoom.roomId, targetParticipantId: kickedJoined.participantId });
+  kickHost.popEvent(SERVER_EVENTS.participantKicked);
+  assert.equal((kickHost.popEvent(SERVER_EVENTS.peerLeft) as { reconnectingCount?: number }).reconnectingCount, 0);
+});
+
+test("T12.4-04: resume clears the reconnecting count in both resume payloads", async () => {
+  const { io } = setupSocketHarness();
+  const host = io.connect("vp124-resume-host");
+  const guest = io.connect("vp124-resume-guest");
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const created = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: created.roomId, password: "pw", nickname: "Guest" });
+  const joined = guest.popEvent(SERVER_EVENTS.roomJoined) as { reconnectToken: string };
+  host.popEvent(SERVER_EVENTS.peerJoined);
+  guest.triggerDisconnect(); host.popEvent(SERVER_EVENTS.peerLeft);
+
+  const resumed = io.connect("vp124-resume-new-socket");
+  resumed.trigger(CLIENT_EVENTS.resumeSession, { roomId: created.roomId, reconnectToken: joined.reconnectToken, supportsSessionResumed: true });
+  await flushPromises();
+  assert.equal((resumed.popEvent(SERVER_EVENTS.sessionResumed) as { reconnectingCount?: number }).reconnectingCount, 0);
+  assert.equal((host.popEvent(SERVER_EVENTS.peerJoined) as { reconnectingCount?: number }).reconnectingCount, 0);
+});
+
+test("T12.4-05/06: capacity remains based on all slots, with and without grace-held participants", () => {
+  const { io, hooks } = setupSocketHarness();
+  const host = io.connect("vp124-capacity-host");
+  host.trigger(CLIENT_EVENTS.createRoom, { password: "pw", nickname: "Host" });
+  const created = host.popEvent(SERVER_EVENTS.roomCreated) as { roomId: string };
+  const guests = Array.from({ length: 4 }, (_, index) => {
+    const guest = io.connect(`vp124-capacity-guest-${index}`);
+    guest.trigger(CLIENT_EVENTS.joinRoom, { roomId: created.roomId, password: "pw", nickname: `Guest-${index}` });
+    const joined = guest.popEvent(SERVER_EVENTS.roomJoined);
+    assert.ok(joined, "the fifth live participant must still be accepted");
+    host.popEvent(SERVER_EVENTS.peerJoined);
+    return guest;
+  });
+
+  const sixthLive = io.connect("vp124-capacity-sixth-live");
+  sixthLive.trigger(CLIENT_EVENTS.joinRoom, { roomId: created.roomId, password: "pw", nickname: "Sixth-Live" });
+  assert.equal(popSocketError(sixthLive)?.code, "ROOM_FULL");
+
+  guests[0]?.triggerDisconnect(); host.popEvent(SERVER_EVENTS.peerLeft);
+  guests[1]?.triggerDisconnect(); host.popEvent(SERVER_EVENTS.peerLeft);
+  assert.equal(hooks.getStateSnapshot().rooms[0]?.participantCount, 5, "sentinels remain reserved capacity");
+
+  const sixthWithGrace = io.connect("vp124-capacity-sixth-grace");
+  sixthWithGrace.trigger(CLIENT_EVENTS.joinRoom, { roomId: created.roomId, password: "pw", nickname: "Sixth-Grace" });
+  assert.equal(popSocketError(sixthWithGrace)?.code, "ROOM_FULL");
+  assert.equal(hooks.getStateSnapshot().rooms[0]?.participantCount, 5, "rejected join must not mutate the room");
 });

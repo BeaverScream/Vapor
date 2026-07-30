@@ -63,7 +63,15 @@ test("T6.1-01: collectMetricsSnapshot() returns all required fields with correct
   }
 
   assert.equal(typeof snap.errorCounts, "object");
-  for (const key of ["RATE_LIMITED", "INVALID_PASSWORD", "ROOM_NOT_FOUND", "ROOM_FULL", "NOT_AUTHORIZED"] as const) {
+  for (const key of [
+    "RATE_LIMITED",
+    "INVALID_PASSWORD",
+    "ROOM_NOT_FOUND",
+    "ROOM_FULL",
+    "NOT_AUTHORIZED",
+    "RECONNECT_TOKEN_STALE",
+    "HOST_RECONNECT_WINDOW_EXPIRED",
+  ] as const) {
     assert.equal(typeof snap.errorCounts[key], "number", `errorCounts.${key} must be a number`);
   }
 });
@@ -76,7 +84,15 @@ test("T6.1-02: each rolling counter increment function increments only its targe
   assert.equal(a1.participantsJoinedTotal, 1);
   assert.equal(a1.roomsCreatedTotal, 0);
   assert.deepEqual(a1.roomsDestroyedByReason, { host_left: 0, host_grace_expired: 0, room_ttl_expired: 0, solo_timeout_expired: 0 });
-  assert.deepEqual(a1.errorCounts, { RATE_LIMITED: 0, INVALID_PASSWORD: 0, ROOM_NOT_FOUND: 0, ROOM_FULL: 0, NOT_AUTHORIZED: 0 });
+  assert.deepEqual(a1.errorCounts, {
+    RATE_LIMITED: 0,
+    INVALID_PASSWORD: 0,
+    ROOM_NOT_FOUND: 0,
+    ROOM_FULL: 0,
+    NOT_AUTHORIZED: 0,
+    RECONNECT_TOKEN_STALE: 0,
+    HOST_RECONNECT_WINDOW_EXPIRED: 0,
+  });
 
   // incrementRoomsCreated — only roomsCreatedTotal changes
   const m2 = createMetrics(makeAccessor());
@@ -85,7 +101,15 @@ test("T6.1-02: each rolling counter increment function increments only its targe
   assert.equal(a2.roomsCreatedTotal, 1);
   assert.equal(a2.participantsJoinedTotal, 0);
   assert.deepEqual(a2.roomsDestroyedByReason, { host_left: 0, host_grace_expired: 0, room_ttl_expired: 0, solo_timeout_expired: 0 });
-  assert.deepEqual(a2.errorCounts, { RATE_LIMITED: 0, INVALID_PASSWORD: 0, ROOM_NOT_FOUND: 0, ROOM_FULL: 0, NOT_AUTHORIZED: 0 });
+  assert.deepEqual(a2.errorCounts, {
+    RATE_LIMITED: 0,
+    INVALID_PASSWORD: 0,
+    ROOM_NOT_FOUND: 0,
+    ROOM_FULL: 0,
+    NOT_AUTHORIZED: 0,
+    RECONNECT_TOKEN_STALE: 0,
+    HOST_RECONNECT_WINDOW_EXPIRED: 0,
+  });
 
   // incrementRoomDestroyed — only the targeted reason key changes
   const m3 = createMetrics(makeAccessor());

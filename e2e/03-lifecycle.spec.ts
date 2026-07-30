@@ -17,7 +17,7 @@ test.describe('lifecycle', () => {
 
       const roomId = await createRoom(hostPage, { nickname: 'Alice' })
       await joinRoom(guestPage, { roomId, nickname: 'Bob' })
-      await expect(hostPage.getByText('2 participants')).toBeVisible({ timeout: 8_000 })
+      await expect(hostPage.getByText('2 connected')).toBeVisible({ timeout: 8_000 })
 
       await hostPage.getByRole('button', { name: /Leave room/i }).click()
 
@@ -40,11 +40,11 @@ test.describe('lifecycle', () => {
 
       const roomId = await createRoom(hostPage, { nickname: 'Alice' })
       await joinRoom(guestPage, { roomId, nickname: 'Bob' })
-      await expect(hostPage.getByText('2 participants')).toBeVisible({ timeout: 8_000 })
+      await expect(hostPage.getByText('2 connected')).toBeVisible({ timeout: 8_000 })
 
       await guestPage.getByRole('button', { name: /Leave room/i }).click()
 
-      await expect(hostPage.getByText('1 participant')).toBeVisible({ timeout: 8_000 })
+      await expect(hostPage.getByText('1 connected')).toBeVisible({ timeout: 8_000 })
       // System message: "<name> left" when reason is "leave"
       await expect(hostPage.getByText('Bob left')).toBeVisible()
     } finally {
@@ -64,13 +64,13 @@ test.describe('lifecycle', () => {
 
       const roomId = await createRoom(hostPage, { nickname: 'Alice' })
       await joinRoom(guestPage, { roomId, nickname: 'Bob' })
-      await expect(hostPage.getByText('2 participants')).toBeVisible({ timeout: 8_000 })
+      await expect(hostPage.getByText('2 connected')).toBeVisible({ timeout: 8_000 })
 
       // Close the context — no graceful leave, simulates TCP disconnect
       await guestCtx.close()
 
       // Host must see the participant count drop immediately (peer_left with reason: disconnect)
-      await expect(hostPage.getByText('1 participant')).toBeVisible({ timeout: 8_000 })
+      await expect(hostPage.getByText('1 connected · 1 reconnecting')).toBeVisible({ timeout: 8_000 })
       // System message: "<name> disconnected" when reason is "disconnect"
       await expect(hostPage.getByText('Bob disconnected')).toBeVisible()
     } finally {
@@ -89,7 +89,7 @@ test.describe('lifecycle', () => {
 
       const roomId = await createRoom(hostPage, { nickname: 'Alice' })
       await joinRoom(guestPage, { roomId, nickname: 'Bob' })
-      await expect(guestPage.getByText('2 participants')).toBeVisible({ timeout: 8_000 })
+      await expect(guestPage.getByText('2 connected')).toBeVisible({ timeout: 8_000 })
 
       await hostCtx.close()
 
@@ -113,7 +113,7 @@ test.describe('lifecycle', () => {
 
       const roomId = await createRoom(hostPage, { nickname: 'Alice' })
       await joinRoom(guestPage, { roomId, nickname: 'Bob' })
-      await expect(hostPage.getByText('2 participants')).toBeVisible({ timeout: 8_000 })
+      await expect(hostPage.getByText('2 connected')).toBeVisible({ timeout: 8_000 })
 
       // Desktop layout has the participant panel open by default; click Remove directly
       await hostPage.getByRole('button', { name: /Remove Bob from room/i }).click()
@@ -147,7 +147,7 @@ test.describe('lifecycle', () => {
 
       const roomId = await createRoom(hostPage, { nickname: 'Alice' })
       await joinRoom(guestPage, { roomId, nickname: 'Bob' })
-      await expect(hostPage.getByText('2 participants')).toBeVisible({ timeout: 8_000 })
+      await expect(hostPage.getByText('2 connected')).toBeVisible({ timeout: 8_000 })
 
       // TCP-drop both participants — liveCount drops to 0
       await hostCtx.close()
@@ -163,7 +163,7 @@ test.describe('lifecycle', () => {
       await joinerPage.getByRole('button', { name: /Join room/i }).click()
 
       // Per spec §3: join is permitted; Charlie becomes the sole live participant
-      await expect(joinerPage.getByText('1 participant')).toBeVisible({ timeout: 8_000 })
+      await expect(joinerPage.getByText('1 connected · 2 reconnecting')).toBeVisible({ timeout: 8_000 })
     } finally {
       await newJoinerCtx.close()
     }

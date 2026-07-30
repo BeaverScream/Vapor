@@ -12,6 +12,13 @@ export function getRoomStatus(participantCount: number, hostReconnectGraceDeadli
   return participantCount >= 2 ? 'Connected' : 'Waiting for peers…'
 }
 
+export function getParticipantCountText(participantCount: number, reconnectingCount: number): string {
+  const connectedLabel = `${participantCount} connected`
+  return reconnectingCount > 0
+    ? `${connectedLabel} · ${reconnectingCount} reconnecting`
+    : connectedLabel
+}
+
 export function getConnectionStatusText(socketState: 'connecting' | 'connected' | 'disconnected'): string {
   if (socketState === 'connected') {
     return 'Connected to signaling.'

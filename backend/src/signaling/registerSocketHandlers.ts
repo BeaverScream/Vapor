@@ -78,7 +78,7 @@ function normalizeNickname(value: unknown): string | null {
   v = v.replace(/\s+/g, " ");
   if (v.length < 3 || v.length > 24) return null;
   if (/\p{C}/u.test(v)) return null;
-  if (!/^[\p{L}\p{N} _-]+$/u.test(v)) return null;
+  if (!/^[\p{L}\p{N} ._-]+$/u.test(v)) return null;
   return v;
 }
 
@@ -86,7 +86,7 @@ function emitParticipantExit(
   socket: Socket,
   removed: ReturnType<typeof removeParticipantBySocket>,
   source: ExitSource,
-  extras?: { liveCount?: number; soloDeadlineAt?: number | null },
+  extras?: { liveCount?: number; reconnectingCount?: number; soloDeadlineAt?: number | null },
 ): void {
   if (!removed) return;
 
@@ -95,6 +95,7 @@ function emitParticipantExit(
       participantId: removed.participantId,
       reason: source,
       participantCount: extras?.liveCount ?? removed.participantCount,
+      reconnectingCount: extras?.reconnectingCount ?? 0,
       ...(extras?.soloDeadlineAt != null ? { soloDeadlineAt: extras.soloDeadlineAt } : {}),
     };
     socket.to(removed.roomId).emit(signaling.SERVER_EVENTS.peerLeft, payload);
@@ -135,6 +136,8 @@ export function registerSocketHandlers({
   const reconnectCtx = reconnect.createReconnectContext();
   const graceCtx = grace.createGraceWindowContext();
   const roomLockChains = new Map<string, Promise<void>>();
+  const getReconnectingCount = (room: { participants: Map<string, { socketId: string }> }): number =>
+    room.participants.size - getLiveParticipantCount(room);
 
   // Error emit helpers with counter tracking. Keep these inside the closure so every
   // handler binds the instrumented version — do not add un-instrumented module-level twins.
@@ -286,11 +289,13 @@ export function registerSocketHandlers({
     participantId: string,
   ): void => {
     const liveCount = getLiveParticipantCount(room);
+    const reconnectingCount = getReconnectingCount(room);
     const soloDeadlineAt = reconcileIdleTimer(roomId, liveCount);
     socket.to(roomId).emit(signaling.SERVER_EVENTS.peerLeft, {
       participantId,
       reason: "disconnect",
       participantCount: liveCount,
+      reconnectingCount,
       ...(soloDeadlineAt !== null ? { soloDeadlineAt } : {}),
     } as PeerLeftPayload);
   };
@@ -499,6 +504,7 @@ export function registerSocketHandlers({
         }
 
         const joinLiveCount = getLiveParticipantCount(joined.room);
+        const joinReconnectingCount = getReconnectingCount(joined.room);
         const policy = graceCtx.roomPolicyById.get(roomId);
         if (policy && !policy.hasEverHadGuest) policy.hasEverHadGuest = true;
         const joinSoloDeadlineAt = reconcileIdleTimer(roomId, joinLiveCount);
@@ -517,6 +523,7 @@ export function registerSocketHandlers({
           expiresAt: policy?.expiresAt ?? room.createdAt + signaling.ROOM_MAX_DURATION_MS,
           participantNickname: normalizedNickname,
           participantCount: joinLiveCount,
+          reconnectingCount: joinReconnectingCount,
           hasPassword: !isOpenRoom,
           roomName: room.roomName,
           ...(joinSoloDeadlineAt !== null ? { soloDeadlineAt: joinSoloDeadlineAt } : {}),
@@ -528,6 +535,7 @@ export function registerSocketHandlers({
           participantId: joined.participantId,
           nickname: normalizedNickname,
           participantCount: joinLiveCount,
+          reconnectingCount: joinReconnectingCount,
         };
 
         socket.to(roomId).emit(signaling.SERVER_EVENTS.peerJoined, peerJoinedPayload);
@@ -642,13 +650,18 @@ export function registerSocketHandlers({
 
           const peers = Array.from(room.participants.values())
             .filter((peer) => peer.participantId !== reconnectRecord.participantId && !peer.socketId.startsWith("disconnected:"))
-            .map((peer) => ({ participantId: peer.participantId, nickname: peer.nickname ?? null }));
+            .map((peer) => ({
+              participantId: peer.participantId,
+              nickname: peer.nickname ?? null,
+              isHost: peer.participantId === room.hostId,
+            }));
 
           const resumeLiveCount = getLiveParticipantCount(room);
+          const resumeReconnectingCount = getReconnectingCount(room);
           const policy = graceCtx.roomPolicyById.get(roomId);
           // Idle timer is participant-agnostic (lifecycle.md §1 Rule 8, §3).
           const resumeSoloDeadlineAt = reconcileIdleTimer(roomId, resumeLiveCount);
-          const sessionResumedPayload: SessionResumedPayload = {
+          const resumedRoomPayload: RoomJoinedPayload = {
             roomId,
             participantId: reconnectRecord.participantId,
             hostId: room.hostId,
@@ -657,9 +670,13 @@ export function registerSocketHandlers({
             expiresAt: policy?.expiresAt ?? room.createdAt + signaling.ROOM_MAX_DURATION_MS,
             participantNickname: participant.nickname ?? null,
             participantCount: resumeLiveCount,
+            reconnectingCount: resumeReconnectingCount,
             hasPassword: !!auth.passwordHash,
             roomName: room.roomName,
             ...(resumeSoloDeadlineAt !== null ? { soloDeadlineAt: resumeSoloDeadlineAt } : {}),
+          };
+          const sessionResumedPayload: SessionResumedPayload = {
+            ...resumedRoomPayload,
             // Present only while a host grace window is active (a resuming host
             // cleared its own grace above, so this is absent on host self-resume).
             ...(policy?.hostGraceDeadlineAt !== undefined
@@ -667,12 +684,20 @@ export function registerSocketHandlers({
               : {}),
           };
 
-          socket.emit(signaling.SERVER_EVENTS.sessionResumed, sessionResumedPayload);
+          if (payload?.supportsSessionResumed === true) {
+            socket.emit(signaling.SERVER_EVENTS.sessionResumed, sessionResumedPayload);
+          } else {
+            // Compatibility path for clients released before session_resumed.
+            // New clients advertise support and therefore receive exactly one
+            // session_resumed response; legacy clients receive room_joined.
+            socket.emit(signaling.SERVER_EVENTS.roomJoined, resumedRoomPayload);
+          }
 
           socket.to(roomId).emit(signaling.SERVER_EVENTS.peerJoined, {
             participantId: reconnectRecord.participantId,
             nickname: participant.nickname ?? undefined,
             participantCount: resumeLiveCount,
+            reconnectingCount: resumeReconnectingCount,
           } as PeerJoinedPayload);
         });
       },
@@ -808,12 +833,14 @@ export function registerSocketHandlers({
         }
 
         const remainingCount = getLiveParticipantCount(room);
+        const reconnectingCount = getReconnectingCount(room);
         const soloDeadlineAt = reconcileIdleTimer(roomId, remainingCount);
 
         const peerLeftPayload: PeerLeftPayload = {
           participantId: targetParticipantId,
           reason: "kick",
           participantCount: remainingCount,
+          reconnectingCount,
           ...(soloDeadlineAt !== null ? { soloDeadlineAt } : {}),
         };
         io.to(roomId).emit(signaling.SERVER_EVENTS.peerLeft, peerLeftPayload);
@@ -827,13 +854,16 @@ export function registerSocketHandlers({
 
       const removed = removeParticipantBySocket(state, socket.id);
 
-      let leaveExtras: { liveCount?: number; soloDeadlineAt?: number | null } | undefined;
+      let leaveExtras: { liveCount?: number; reconnectingCount?: number; soloDeadlineAt?: number | null } | undefined;
       if (removed?.roomStillActive) {
         const remainingRoom = state.rooms.get(removed.roomId);
         if (remainingRoom) {
           const liveCount = getLiveParticipantCount(remainingRoom);
+          const reconnectingCount = getReconnectingCount(remainingRoom);
           const deadline = reconcileIdleTimer(removed.roomId, liveCount);
-          leaveExtras = deadline !== null ? { liveCount, soloDeadlineAt: deadline } : { liveCount };
+          leaveExtras = deadline !== null
+            ? { liveCount, reconnectingCount, soloDeadlineAt: deadline }
+            : { liveCount, reconnectingCount };
         }
       }
 

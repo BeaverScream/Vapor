@@ -13,8 +13,8 @@ test.describe('smoke', () => {
     await expect(page.locator('#chat-input, #chat-input-desktop').first()).toBeVisible({ timeout: 10_000 })
     // Room ID chip appears as #<id>
     await expect(page.getByText(/#[a-zA-Z0-9-]+/).first()).toBeVisible()
-    // Single participant on entry
-    await expect(page.getByText('1 participant')).toBeVisible()
+    // One live participant on entry; no reconnecting slots are held.
+    await expect(page.getByText('1 connected')).toBeVisible()
     // Solo timer chip: "Solo room expires if no guest joins in …"
     await expect(page.getByText(/Solo room expires if no guest joins in/)).toBeVisible()
     // Room lifetime chip: "Ends in …"
@@ -23,7 +23,7 @@ test.describe('smoke', () => {
     await expect(page.getByRole('button', { name: /Leave room/i })).toBeVisible()
   })
 
-  test('second participant joins and both see 2 participants', async ({ browser }) => {
+  test('second participant joins and both see 2 connected', async ({ browser }) => {
     const hostCtx = await browser.newContext()
     const guestCtx = await browser.newContext()
     try {
@@ -33,8 +33,8 @@ test.describe('smoke', () => {
       const roomId = await createRoom(hostPage, { nickname: 'Alice' })
       await joinRoom(guestPage, { roomId, nickname: 'Bob' })
 
-      await expect(hostPage.getByText('2 participants')).toBeVisible({ timeout: 8_000 })
-      await expect(guestPage.getByText('2 participants')).toBeVisible({ timeout: 8_000 })
+      await expect(hostPage.getByText('2 connected')).toBeVisible({ timeout: 8_000 })
+      await expect(guestPage.getByText('2 connected')).toBeVisible({ timeout: 8_000 })
     } finally {
       await hostCtx.close()
       await guestCtx.close()

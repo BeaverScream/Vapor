@@ -114,7 +114,8 @@ export type SignalIceRequest = Required<SignalIcePayload>
 
 export type ResumeSessionPayload = SharedResumeSessionPayload
 
-export type ResumeSessionRequest = Required<ResumeSessionPayload>
+export type ResumeSessionRequest = Required<Pick<ResumeSessionPayload, 'roomId' | 'reconnectToken'>> &
+  Pick<ResumeSessionPayload, 'supportsSessionResumed'>
 
 export type CreateRoomRequest = {
   password: string
@@ -162,6 +163,7 @@ export interface RoomSessionState {
   soloDeadlineAt: number | null
   participants: Participant[]
   participantCount: number
+  reconnectingCount: number
   chatMessages: ChatMessage[]
   chatDraft: string
   chatConnectionState: ChatConnectionState

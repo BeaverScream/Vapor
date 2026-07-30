@@ -28,7 +28,7 @@ Tracks active phase work only. Each phase section lists the VP tasks for that ph
 
 - [x] **VP-12.1 Resolve Contract/Code Drifts** *(BL-DOC-CONTRACT-DRIFT-01)*
   - Three drifts resolved — all implemented in code (not dropped from spec):
-  - **(1) `session_resumed` event** — **Implement.** Resume carries a distinct payload including `hostReconnectGraceDeadlineAt` (needed so a resuming guest knows the host grace deadline — absent from `room_joined`). Add `SESSION_RESUMED` to `shared/events.ts`; add `SessionResumedPayload` (extends `RoomJoinedPayload` with `hostReconnectGraceDeadlineAt?`) to `shared/payloads.ts`; backend emits `SERVER_EVENTS.SESSION_RESUMED` on the resume path instead of `roomJoined`; frontend adds `onSessionResumed` handler alongside `onRoomJoined`.
+  - **(1) `session_resumed` event** — **Implement with compatibility negotiation.** Resume carries a distinct payload including `hostReconnectGraceDeadlineAt`. New clients advertise `supportsSessionResumed: true` and receive `session_resumed`; clients without the capability receive the equivalent legacy `room_joined` response.
   - **(2) `peers[].isHost` field** — **Implement.** Add `isHost: peer.participantId === room.hostId` to the peers map in `roomLifecycle.ts` `joinRoomRecord` and the resume handler in `registerSocketHandlers.ts`. Update `shared/payloads.ts` peers type to `Array<{ participantId: string; nickname: string | null; isHost: boolean }>`. `signaling-contract.md` §3/§5 already correct — code-only fix.
   - **(3) Granular resume error codes** — **Implement.** Backend `resume_session` emits specific codes per failure path: token hash not found → `RECONNECT_TOKEN_STALE`; participant not disconnected → `RECONNECT_TOKEN_STALE`; grace expired + host → `HOST_RECONNECT_WINDOW_EXPIRED`; grace expired + guest → `RECONNECT_TOKEN_STALE`; room destroyed after valid token → `ROOM_NOT_FOUND`. Also clean up `error-codes.md` line 13 (`ROOM_NOT_FOUND` still references `liveCount === 0` gate removed in Phase 11 OOS-3).
 
@@ -38,14 +38,14 @@ Tracks active phase work only. Each phase section lists the VP tasks for that ph
   - **Fix is display-side only:**
     - Add `reconnectingCount` (in-grace `disconnected:` sentinel count) to `room_joined`, `peer_joined`, and `peer_left` payloads.
     - `ROOM_FULL` error copy updated: "Room is at capacity — some slots are held for reconnecting participants."
-    - Client already shows grace-state participants with a visual indicator (existing spec); no new UI component needed.
+    - Keep the roster live-only and show reserved capacity separately as `N connected · M reconnecting`.
   - No gate logic changes.
 
 ### Implementation
 
 - [ ] **VP-12.3 Resume Session Event & Granular Error Codes** *(BL-DOC-CONTRACT-DRIFT-01, BL-RESUME-DEAD-ROOM-UI-01)*
   - Implements VP-12.1 decisions (1) and (3) in code, and closes the resume UI transition gap.
-  - **Backend:** Emit `SESSION_RESUMED` (not `roomJoined`) in the resume path with a payload that includes `hostReconnectGraceDeadlineAt`. Replace all `emitRoomNotFound` calls in `resume_session` with the specific code per the 5-path mapping in VP-12.1 (3).
+  - **Backend:** Capability-advertising clients receive `SESSION_RESUMED`; legacy clients receive `roomJoined`. Replace resume failure sites with the specific code per the VP-12.1 mapping.
   - **Shared:** Add `SESSION_RESUMED` to `SERVER_EVENT_NAMES` in `shared/events.ts`. Add `SessionResumedPayload` type to `shared/payloads.ts` (extends join payload with `hostReconnectGraceDeadlineAt?: number`).
   - **Frontend:** Add `onSessionResumed` handler (mirrors `onRoomJoined` but also populates `hostReconnectGraceDeadlineAt` in state). Wire it through `room-socket-client.ts`, `useSocketConnection.ts`, `useVaporRoom.ts`. The existing `onError` branches already call `resetToLobby` for both codes in the `autoResumeRequestedRef` and `screen === 'reconnecting'` paths — verify the edge case where neither branch catches the error (`screen === 'room'`, ref already cleared) and add a `withRoomEnded` guard there.
   - **Docs:** `error-codes.md` line 13 — remove the stale `liveCount === 0` clause from `ROOM_NOT_FOUND`.
@@ -54,7 +54,7 @@ Tracks active phase work only. Each phase section lists the VP tasks for that ph
   - Implements VP-12.2 display fix.
   - **Backend:** Derive `reconnectingCount = participants.size - getLiveParticipantCount(room)` and include it in `room_joined`, `peer_joined`, and `peer_left` payloads (optional field, 0 when no grace-held participants).
   - **Shared:** Add `reconnectingCount?: number` to `RoomJoinedPayload`, `PeerJoinedPayload`, `PeerLeftPayload`.
-  - **Frontend:** Consume `reconnectingCount` in state; update `ROOM_FULL` error copy in `error-copy.ts`; `getErrorMessage(ROOM_FULL)` returns `"Room is at capacity — some slots are held for reconnecting participants."` Note: `ErrorCode` type and all other `getErrorMessage` entries are already complete — no other copy changes needed.
+  - **Frontend:** Normalize and consume `reconnectingCount`, display it separately from the live roster, and update `ROOM_FULL` copy to explain reserved reconnect slots.
 
 - [ ] **VP-12.5 Fix `peers[].isHost` in Join/Resume Payloads** *(BL-DOC-CONTRACT-DRIFT-01)*
   - Implements VP-12.1 decision (2).
@@ -64,7 +64,7 @@ Tracks active phase work only. Each phase section lists the VP tasks for that ph
 
 - [ ] **VP-12.6 Fix WebRTC Sync-Peers Race** *(BL-WEBRTC-SYNCPEERS-RACE-01)*
   - `onPeerLeft` derives `remainingPeerIds` from `stateRef.current.participants` then calls `syncPeers`. `peer_joined` updates `participants` via async `setState`, so if `peer_left` fires before the `peer_joined` commit, `syncPeers` prunes the new peer's active connection.
-  - **Fix:** Move the `syncPeers` call inside the `setState` callback — after `withPeerLeft` runs — so `remainingPeerIds` is derived from the already-updated state, never from a stale ref snapshot.
+  - **Fix:** Keep the state updater pure. Mark repair pending before the update, then synchronize once from committed participant state in an idempotent commit-phase effect.
 
 - [ ] **VP-12.7 Fix Closed Data Channel Reuse** *(BL-WEBRTC-CLOSED-CHANNEL-REUSE-01)*
   - `syncPeers` detects a peer needs a new offer (`needsOffer` returns `true`) but `startOffer`'s guard `if (!this.dataChannels.has(peerId))` blocks channel creation when a `'closed'` channel still occupies `dataChannels`. The renegotiated offer carries no usable data channel.

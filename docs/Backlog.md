@@ -2,7 +2,7 @@
 
 Unresolved items only. Resolved items are not recorded here — they are archived in phase work documents and test results. Active phase work lives in [docs/Todo.md](Todo.md).
 
-Last updated: 2026-06-30 (added BL-FEAT-LASTSEEN-01 — surface participant lastSeenAt activity, from Phase 11 CR11-9)
+Last updated: 2026-07-30 (tracked four high-risk non-UI issues found in Phase 12 review)
 
 ---
 
@@ -121,6 +121,26 @@ Items in this section apply to the CSV backend. BL-ANALYTICS-02 is the long-term
 ---
 
 ## Signaling & Protocol
+
+- [ ] **BL-SIG-SOCKET-ROOM-CLEANUP-01** Leave and destruction must remove Socket.IO room membership 🔴 **Severity: High** *(Phase 12 review OOS12-3)*
+  - **Current Issue:** A voluntary `leave_room` removes application membership but does not call `socket.leave(roomId)`. The same socket can join Room B while still subscribed to Room A; delayed Room A broadcasts can then mutate or terminate Room B because frontend event handlers are not room/session gated. Room destruction also clears application maps without removing connected sockets from the adapter room.
+  - **Why:** Cross-room event delivery can show incorrect membership, teardown an unrelated active room, or expose ephemeral room events to a socket that has already left. This violates room isolation even though user data remains in memory only.
+  - **Expected Outcome:** Remove adapter-room membership on voluntary leave and destruction for each affected connected socket, with idempotent cleanup. Add an integration flow where a socket leaves Room A, joins Room B, and a later Room A broadcast cannot alter Room B state.
+
+- [ ] **BL-SIG-ROOM-LOCK-CLEANUP-01** Invalid resume room IDs must not retain unbounded lock-chain entries 🔴 **Severity: High** *(Phase 12 review OOS12-4)*
+  - **Current Issue:** `withRoomLock` creates a `roomLockChains` map entry for each truthy resume `roomId`; nonexistent attacker-controlled IDs are never removed by room cleanup. The pre-check also accepts runtime non-string values by truthiness.
+  - **Why:** Repeated unique invalid resume payloads can grow server RAM without bound, conflicting with Vapor's bounded in-memory operational state.
+  - **Expected Outcome:** Validate `roomId` as a non-empty bounded string before lock allocation and safely remove a completed lock-chain entry only when no newer chain replaced it. Add abuse-oriented integration coverage for many distinct invalid room IDs and malformed runtime values.
+
+- [ ] **BL-SIG-GRACE-SWEEP-RACE-01** Reconnect-token sweep must not suppress guest-grace cleanup 🔴 **Severity: High** *(Phase 12 review OOS12-5)*
+  - **Current Issue:** The reconnect-token sweep can delete a disconnected-participant record before the guest-grace callback runs. That callback then returns early, leaving the room sentinel, nickname reservation, and capacity slot indefinitely.
+  - **Why:** A race at expiry can permanently reserve capacity and a nickname in an otherwise ephemeral room, preventing valid joins until unrelated room destruction.
+  - **Expected Outcome:** Make token sweeping and guest-grace expiry share an idempotent cleanup path that always removes the sentinel, reservation, and capacity slot exactly once. Cover both timer orderings with deterministic time control.
+
+- [ ] **BL-WEBRTC-OFFER-DISPOSAL-01** Pending offers must not recreate peer state after mesh disposal 🔴 **Severity: High** *(Phase 12 review OOS12-6)*
+  - **Current Issue:** An asynchronous `createOffer` or `setLocalDescription` can settle after `dispose()`. Its catch path may remove and recreate a peer connection on a disposed mesh; an older failure can also tear down a newer connection for the same peer.
+  - **Why:** Late async work can leak WebRTC resources and revive P2P state after room teardown, undermining the terminal-session cleanup just fixed.
+  - **Expected Outcome:** Add mesh generation/disposed and per-offer in-flight guards so late continuations are harmless. Test disposal during pending offer creation and an older-offer failure after a newer connection exists.
 
 
 - [ ] **BL-ARCH-STATE-MODEL-01** Design §3 context module types not yet verified against current handler implementations
